@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Steam 游戏存档备份管理器 v1.3.6 — 通用版"""
+"""Steam 游戏存档备份管理器 v1.3.7 — 通用版"""
 
 import os
 import sys
@@ -23,6 +23,7 @@ import subprocess
 import urllib.request
 import urllib.error
 import urllib.parse
+import webbrowser
 import html
 import tkinter
 import weakref
@@ -80,7 +81,7 @@ except ImportError as exc:
 # ══════════════════════════════════════════════
 
 APP_NAME = "Steam Save Manager"
-VERSION = "1.3.6"
+VERSION = "1.3.7"
 APP_DIR = Path(os.path.dirname(os.path.abspath(sys.argv[0])))
 LEGACY_CONFIG_DIR = Path.home() / ".steam_save_manager"
 STARTUP_AUTOSTART_FLAG = "--startup-launch"
@@ -238,6 +239,8 @@ TRANSLATIONS = {
         "tray_missing": "⚠ 未安装 pystray，pip install pystray",
         "autostart": "开机自启",
         "autostart_desc": "开启后登录 Windows 时自动启动",
+        "autostart_minimize": "开机自启时最小化",
+        "autostart_minimize_desc": "通过开机自启启动时默认最小化到托盘或任务栏",
         "backup_rotation": "备份轮转策略",
         "max_backups": "每个游戏最多保留",
         "max_backups_suffix": "个备份（0 = 不限）",
@@ -354,6 +357,8 @@ TRANSLATIONS = {
         "tray_missing": "⚠ pystray is not installed. Run: pip install pystray",
         "autostart": "Launch at Startup",
         "autostart_desc": "Start automatically when you sign in to Windows",
+        "autostart_minimize": "Minimize on Startup Launch",
+        "autostart_minimize_desc": "Start minimized to the tray or taskbar when launched at sign-in",
         "backup_rotation": "Backup Retention",
         "max_backups": "Keep at most",
         "max_backups_suffix": "backups per game (0 = unlimited)",
@@ -528,6 +533,35 @@ def download_update_package(manifest: dict, dest_dir: Path, timeout: int = 30) -
             pass
     temp_target.replace(target)
     return target
+
+
+def get_update_download_dir() -> Path:
+    preferred = APP_DIR / "updates"
+    if _can_write_dir(preferred):
+        return preferred
+    fallback = CONFIG_DIR / "updates"
+    fallback.mkdir(parents=True, exist_ok=True)
+    return fallback
+
+
+def _build_windows_replace_and_launch_command(downloaded_path: Path, current_path: Path, *, backup_old: bool = True) -> str:
+    src = str(downloaded_path).replace("'", "''")
+    dst = str(current_path).replace("'", "''")
+    bak = str(current_path.with_suffix(current_path.suffix + ".old")).replace("'", "''")
+    backup_block = (
+        "if (Test-Path -LiteralPath $bak) { Remove-Item -LiteralPath $bak -Force } "
+        "if (Test-Path -LiteralPath $dst) { Move-Item -LiteralPath $dst -Destination $bak -Force } "
+        if backup_old else
+        "if (Test-Path -LiteralPath $dst) { Remove-Item -LiteralPath $dst -Force } "
+    )
+    return (
+        "$ErrorActionPreference='SilentlyContinue'; "
+        f"$src='{src}'; $dst='{dst}'; $bak='{bak}'; "
+        "Start-Sleep -Seconds 1; "
+        f"{backup_block}"
+        "Move-Item -LiteralPath $src -Destination $dst -Force; "
+        "Start-Process -FilePath $dst"
+    )
 
 # 系统环境路径
 APPDATA = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming"))
@@ -3510,6 +3544,7 @@ def load_config() -> dict:
         "watch_enabled": False,
         "watch_cooldown": 60,
         "autostart": False,
+        "autostart_minimize": True,
         "sync_enabled": False,
         "sync_folder": "",
         "sync_folder_source": "",
@@ -4364,7 +4399,13 @@ def _webdav_apply_client_options(client, cfg: Optional[dict]):
 def webdav_is_ready(cfg: Optional[dict]) -> bool:
     if not cfg or not HAS_WEBDAV or not cfg.get("webdav_enabled"):
         return False
-    return bool(str(cfg.get("webdav_url", "") or "").strip())
+    if not str(cfg.get("webdav_url", "") or "").strip():
+        return False
+    username = str(cfg.get("webdav_username", "") or "").strip()
+    password = _webdav_decode_password(str(cfg.get("webdav_password", "") or ""))
+    if (username and not password) or (password and not username):
+        return False
+    return True
 
 
 def get_effective_sync_root(sync_folder: str, cfg: Optional[dict] = None,
@@ -4393,6 +4434,10 @@ def get_sync_backend_issue(sync_folder: str, cfg: Optional[dict] = None) -> str:
             return "webdav_component_missing"
         if not str(cfg.get("webdav_url", "") or "").strip():
             return "webdav_url_missing"
+        username = str(cfg.get("webdav_username", "") or "").strip()
+        password = _webdav_decode_password(str(cfg.get("webdav_password", "") or ""))
+        if (username and not password) or (password and not username):
+            return "webdav_credentials_incomplete"
     if local_root:
         return "sync_folder_missing"
     return "not_configured"
@@ -5073,6 +5118,41 @@ def mark_game_sync_conflict(cfg: Optional[dict], game: dict, reason: str,
     save_config(cfg)
 
 
+def snooze_game_sync_conflict(cfg: Optional[dict], game: dict, seconds: int = 300):
+    if not cfg:
+        return
+    store = cfg.get("sync_state", {})
+    if not isinstance(store, dict):
+        return
+    key = get_game_sync_key(game)
+    entry = store.get(key)
+    if not isinstance(entry, dict):
+        return
+    conflict = entry.get("pending_conflict")
+    if not isinstance(conflict, dict):
+        return
+    entry = dict(entry)
+    conflict = dict(conflict)
+    conflict["snoozed_until"] = time.time() + max(0, int(seconds))
+    entry["pending_conflict"] = conflict
+    store[key] = entry
+    save_config(cfg)
+
+
+def is_game_sync_conflict_snoozed(cfg: Optional[dict], game: dict) -> bool:
+    if not cfg:
+        return False
+    state = get_game_sync_state(cfg, game)
+    conflict = state.get("pending_conflict")
+    if not isinstance(conflict, dict):
+        return False
+    try:
+        snoozed_until = float(conflict.get("snoozed_until", 0) or 0)
+    except Exception:
+        snoozed_until = 0.0
+    return snoozed_until > time.time()
+
+
 def clear_game_sync_conflict(cfg: Optional[dict], game: dict):
     if not cfg:
         return
@@ -5266,6 +5346,12 @@ def sync_game_save(game: dict, sync_folder: str, mode: str = "smart",
                 "跳过：WebDAV 已启用，但服务器地址为空",
                 "Skipped: WebDAV is enabled, but the server URL is empty",
             )
+        if issue == "webdav_credentials_incomplete":
+            return bilingual_text(
+                lang,
+                "跳过：WebDAV 用户名或密码不完整",
+                "Skipped: WebDAV username or password is incomplete",
+            )
         return bilingual_text(
             lang,
             "跳过：同步目录与 WebDAV 均不可用",
@@ -5278,6 +5364,7 @@ def sync_game_save(game: dict, sync_folder: str, mode: str = "smart",
     webdav_cache_root = (CONFIG_DIR / "webdav_sync_cache")
     using_webdav_cache = Path(effective_sync_root).resolve() == webdav_cache_root.resolve()
     webdav_error = ""
+    webdav_prefetch_error = ""
 
     def _with_webdav_status(message: str) -> str:
         nonlocal webdav_error
@@ -5298,8 +5385,8 @@ def sync_game_save(game: dict, sync_folder: str, mode: str = "smart",
                 dest_dir,
                 cache_mirror_remote=using_webdav_cache,
             )
-        except Exception:
-            pass
+        except Exception as e:
+            webdav_prefetch_error = f"{type(e).__name__}: {e}"
 
     local_info = snapshot_sync_specs(configured_specs, configured_paths[0] if len(configured_paths) == 1 else bilingual_text(lang, f"{len(configured_paths)} 个本地目录", f"{len(configured_paths)} local folders"))
     local_count = int(local_info.get("file_count", 0) or 0)
@@ -5331,7 +5418,7 @@ def sync_game_save(game: dict, sync_folder: str, mode: str = "smart",
             }
         return remote_hash_value, remote_count_value, remote_label_value, remote_info_value
 
-    remote_payload = get_remote_sync_payload(dest_dir, len(configured_paths))
+    remote_payload = None if (using_webdav_cache and webdav_prefetch_error) else get_remote_sync_payload(dest_dir, len(configured_paths))
     remote_hash, remote_count, remote_label, remote_info = _build_remote_state(remote_payload)
     should_refresh_local_mirror = (
         not using_webdav_cache
@@ -5393,21 +5480,24 @@ def sync_game_save(game: dict, sync_folder: str, mode: str = "smart",
         archive_path, meta_path = create_sync_archive(
             game, dest_dir, configured_specs, local_info, keep_count=keep_count
         )
+        upload_ok = True
         # WebDAV: 上传存档到远程
         if webdav_active and archive_path:
             if not HAS_WEBDAV:
                 webdav_error = WEBDAV_IMPORT_ERROR or "webdavclient3 not installed"
+                upload_ok = False
             else:
                 ok, upload_msg = webdav_upload_archive(cfg, str(archive_path), str(meta_path), game)
                 if not ok:
                     webdav_error = upload_msg or "upload_failed"
+                    upload_ok = False
                 else:
                     webdav_error = ""
                     try:
                         webdav_enforce_archive_limits(cfg, game, keep_count)
                     except Exception:
                         pass
-        return archive_path
+        return archive_path, upload_ok
 
     def _download_remote_payload(current_remote: Optional[dict] = None):
         if current_remote is None:
@@ -5438,6 +5528,13 @@ def sync_game_save(game: dict, sync_folder: str, mode: str = "smart",
         set_game_sync_state(cfg, game, local_hash, remote_hash, action)
         clear_game_sync_conflict(cfg, game)
 
+    if using_webdav_cache and webdav_prefetch_error and mode in {"download", "bidirectional"}:
+        return bilingual_text(
+            lang,
+            f"跳过：WebDAV 远端状态刷新失败（{webdav_prefetch_error}）",
+            f"Skipped: failed to refresh WebDAV remote state ({webdav_prefetch_error})",
+        )
+
     if mode == "upload":
         if local_count == 0:
             return bilingual_text(
@@ -5448,7 +5545,13 @@ def sync_game_save(game: dict, sync_folder: str, mode: str = "smart",
         if local_hash == remote_hash:
             _record_current()
             return bilingual_text(lang, "跳过：本地与同步文件夹已一致", "Skipped: local and sync folders are already identical")
-        _create_remote_archive()
+        _, upload_ok = _create_remote_archive()
+        if using_webdav_cache and webdav_active and not upload_ok:
+            return bilingual_text(
+                lang,
+                f"上传失败：WebDAV 上传未完成（{webdav_error or 'upload_failed'}）",
+                f"Upload failed: WebDAV upload did not complete ({webdav_error or 'upload_failed'})",
+            )
         create_backup(game, sync_tag)
         _record_synced(local_hash, "upload")
         return _with_webdav_status(bilingual_text(
@@ -5478,7 +5581,13 @@ def sync_game_save(game: dict, sync_folder: str, mode: str = "smart",
             _record_synced(remote_hash, "download")
             return bilingual_text(lang, "↓ 已下载并解压 ZIP（云端 → 本地）", "↓ Downloaded and extracted ZIP archive (cloud → local)")
         if remote_count == 0:
-            _create_remote_archive()
+            _, upload_ok = _create_remote_archive()
+            if using_webdav_cache and webdav_active and not upload_ok:
+                return bilingual_text(
+                    lang,
+                    f"上传失败：WebDAV 上传未完成（{webdav_error or 'upload_failed'}）",
+                    f"Upload failed: WebDAV upload did not complete ({webdav_error or 'upload_failed'})",
+                )
             create_backup(game, sync_tag)
             _record_synced(local_hash, "upload")
             return _with_webdav_status(bilingual_text(
@@ -5494,7 +5603,13 @@ def sync_game_save(game: dict, sync_folder: str, mode: str = "smart",
             local_changed = local_hash != base_local
             remote_changed = remote_hash != base_remote
             if local_changed and not remote_changed:
-                _create_remote_archive()
+                _, upload_ok = _create_remote_archive()
+                if using_webdav_cache and webdav_active and not upload_ok:
+                    return bilingual_text(
+                        lang,
+                        f"上传失败：WebDAV 上传未完成（{webdav_error or 'upload_failed'}）",
+                        f"Upload failed: WebDAV upload did not complete ({webdav_error or 'upload_failed'})",
+                    )
                 create_backup(game, sync_tag)
                 _record_synced(local_hash, "upload")
                 return _with_webdav_status(bilingual_text(
@@ -5848,7 +5963,7 @@ def delete_linked_sync_archive(cfg: Optional[dict], game_ref, archive_name: str)
     if not cfg or not storage_key or not archive_name:
         return result
 
-    local_root = str(cfg.get("sync_folder", "") or "").strip()
+    local_root = get_effective_sync_root(str(cfg.get("sync_folder", "") or "").strip(), cfg, ensure=True)
     if local_root and os.path.isdir(local_root):
         archive_root = get_sync_archive_root(get_sync_game_dir(local_root, game_ref))
         try:
@@ -6666,6 +6781,7 @@ class SteamSaveManager(ctk.CTk):
         self._detail_refresh_job = None  # 详情页自动刷新定时器
         self._sync_ui_queue: queue.Queue = queue.Queue()
         self._open_conflict_dialogs: set[str] = set()
+        self._resolving_sync_conflicts: set[str] = set()
         self._current_frame = "home"
         self._about_update_status_label = None
         self._about_update_btn = None
@@ -6755,6 +6871,8 @@ class SteamSaveManager(ctk.CTk):
 
     def _apply_startup_launch_behavior(self):
         if not STARTUP_LAUNCH:
+            return
+        if not self.cfg.get("autostart_minimize", True):
             return
         if self.cfg.get("minimize_to_tray", True) and HAS_TRAY:
             self.withdraw()
@@ -7030,6 +7148,80 @@ class SteamSaveManager(ctk.CTk):
             except Exception:
                 pass
         return messagebox.askyesnocancel(title, message, parent=owner)
+
+    def _ask_update_action(self, manifest: dict, parent=None) -> str:
+        owner = self._resolve_dialog_parent(parent)
+        notes = manifest.get("notes", "").strip() or self.bi("暂无更新说明", "No release notes")
+        result = {"action": "cancel"}
+        d = ctk.CTkToplevel(owner)
+        d.title(self.bi("发现新版本", "Update Available"))
+        d.geometry("620x420")
+        self._prepare_popup(d)
+        d.grid_columnconfigure(0, weight=1)
+        d.grid_rowconfigure(1, weight=1)
+
+        hdr = ctk.CTkFrame(d, fg_color="transparent")
+        hdr.grid(row=0, column=0, padx=18, pady=(18, 8), sticky="ew")
+        hdr.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(
+            hdr,
+            text=self.bi(f"发现新版本 v{manifest['version']}", f"New Version v{manifest['version']}"),
+            font=font(18, "bold"),
+        ).grid(row=0, column=0, sticky="w")
+        ctk.CTkLabel(
+            hdr,
+            text=self.bi(f"当前版本 v{VERSION}", f"Current version v{VERSION}"),
+            font=font(12),
+            text_color=C_SUBTLE_TEXT,
+        ).grid(row=1, column=0, pady=(4, 0), sticky="w")
+
+        body = ctk.CTkTextbox(d, font=font(12), wrap="word")
+        body.grid(row=1, column=0, padx=16, pady=(0, 12), sticky="nsew")
+        body.insert(
+            "1.0",
+            self.bi(
+                f"更新说明：\n{notes}\n\n请选择操作：\n- 立即下载：由软件直接下载更新包\n- 浏览器下载：跳转到浏览器打开下载链接",
+                f"Release notes:\n{notes}\n\nChoose an action:\n- Download Now: download the update package in the app\n- Browser Download: open the download link in your browser",
+            ),
+        )
+        body.configure(state="disabled")
+
+        btns = ctk.CTkFrame(d, fg_color="transparent")
+        btns.grid(row=2, column=0, padx=18, pady=(0, 18), sticky="e")
+
+        def _set_action(action: str):
+            result["action"] = action
+            try:
+                d.grab_release()
+            except Exception:
+                pass
+            d.destroy()
+
+        d.protocol("WM_DELETE_WINDOW", lambda: _set_action("cancel"))
+        ctk.CTkButton(
+            btns,
+            text=self.bi("立即下载", "Download Now"),
+            width=120, height=36, font=font(12, "bold"),
+            corner_radius=8, fg_color=BTN_SUCCESS, hover_color=BTN_SUCCESS_H,
+            command=lambda: _set_action("download"),
+        ).pack(side="left", padx=(0, 8))
+        ctk.CTkButton(
+            btns,
+            text=self.bi("浏览器下载", "Browser Download"),
+            width=140, height=36, font=font(12, "bold"),
+            corner_radius=8, fg_color=BTN_BLUE, hover_color=BTN_BLUE_H,
+            command=lambda: _set_action("browser"),
+        ).pack(side="left", padx=(0, 8))
+        ctk.CTkButton(
+            btns,
+            text=self.bi("稍后再说", "Later"),
+            width=110, height=36, font=font(12, "bold"),
+            corner_radius=8, fg_color=BTN_PRIMARY, hover_color=BTN_PRIMARY_H,
+            command=lambda: _set_action("cancel"),
+        ).pack(side="left")
+
+        d.wait_window()
+        return result["action"]
 
     def _ask_directory(self, **kwargs):
         self._prepare_dialog_parent()
@@ -8944,6 +9136,8 @@ class SteamSaveManager(ctk.CTk):
                     status_text = self.bi("WebDAV 已启用，但当前运行环境缺少 webdavclient3 组件", "WebDAV is enabled, but webdavclient3 is unavailable in the current runtime")
                 elif sync_issue == "webdav_url_missing":
                     status_text = self.bi("WebDAV 已启用，但服务器地址为空", "WebDAV is enabled, but the server URL is empty")
+                elif sync_issue == "webdav_credentials_incomplete":
+                    status_text = self.bi("WebDAV 用户名或密码不完整", "WebDAV username or password is incomplete")
                 else:
                     status_text = self.bi("同步目录与 WebDAV 均未配置，请在设置中启用其中一种", "Neither a sync folder nor WebDAV is configured. Enable one in Settings.")
                 self._detail_sync_monitor_status.configure(text=status_text)
@@ -8980,12 +9174,15 @@ class SteamSaveManager(ctk.CTk):
                 kind, payload = self._sync_ui_queue.get_nowait()
                 if kind == "conflict":
                     game = find_game_by_sync_key(self.cfg, payload)
-                    if game:
+                    if game and not is_game_sync_conflict_snoozed(self.cfg, game):
                         self._show_sync_conflict_dialog(game)
         except queue.Empty:
             pass
         for game in self.cfg.get("games", []):
-            if get_game_sync_state(self.cfg, game).get("pending_conflict"):
+            if (
+                get_game_sync_state(self.cfg, game).get("pending_conflict")
+                and not is_game_sync_conflict_snoozed(self.cfg, game)
+            ):
                 self._show_sync_conflict_dialog(game)
                 break
         self.after(1200, self._drain_sync_ui_queue)
@@ -9002,11 +9199,13 @@ class SteamSaveManager(ctk.CTk):
 
     def _show_sync_conflict_dialog(self, game: dict):
         game_key = get_game_sync_key(game)
-        if game_key in self._open_conflict_dialogs:
+        if game_key in self._open_conflict_dialogs or game_key in self._resolving_sync_conflicts:
             return
         state = get_game_sync_state(self.cfg, game)
         conflict = state.get("pending_conflict")
         if not isinstance(conflict, dict):
+            return
+        if is_game_sync_conflict_snoozed(self.cfg, game):
             return
 
         self._open_conflict_dialogs.add(game_key)
@@ -9018,7 +9217,7 @@ class SteamSaveManager(ctk.CTk):
             self._open_conflict_dialogs.discard(game_key)
             d.destroy()
 
-        d.protocol("WM_DELETE_WINDOW", _close)
+        d.protocol("WM_DELETE_WINDOW", lambda: self._defer_sync_conflict(game, d))
 
         ctk.CTkLabel(
             d,
@@ -9050,7 +9249,9 @@ class SteamSaveManager(ctk.CTk):
         btns.grid(row=3, column=0, columnspan=2, padx=20, pady=(8, 18), sticky="e")
         ctk.CTkButton(
             btns, text=self.bi("稍后处理", "Later"), width=100,
-            fg_color=BTN_SUCCESS, hover_color=BTN_SUCCESS_H, command=_close
+            fg_color=BTN_SUCCESS,
+            hover_color=BTN_SUCCESS_H,
+            command=lambda: self._defer_sync_conflict(game, d),
         ).pack(side="left", padx=6)
         ctk.CTkButton(
             btns, text=self.bi("仅下载云端", "Download Only"), width=120, fg_color=BTN_WARN,
@@ -9063,22 +9264,59 @@ class SteamSaveManager(ctk.CTk):
             command=lambda: self._resolve_sync_conflict(game, "upload", d)
         ).pack(side="left", padx=6)
 
-    def _resolve_sync_conflict(self, game: dict, mode: str, dialog):
-        try:
-            result = sync_game_save(
-                game,
-                get_effective_sync_root(self.cfg.get("sync_folder", ""), self.cfg, ensure=True),
-                mode,
-                cfg=self.cfg
-            )
-            self._show_info(self.bi("冲突已处理", "Conflict Resolved"), self.bi(f"「{game['name']}」{result}", f"{game['name']}: {result}"))
-            self._refresh_proc_status()
-        except Exception as e:
-            self._show_error(self.bi("处理失败", "Resolution Failed"), self.bi(f"「{game['name']}」处理冲突失败：\n{type(e).__name__}: {e}", f"Failed to resolve conflict for {game['name']}:\n{type(e).__name__}: {e}"))
-            return
-        finally:
-            self._open_conflict_dialogs.discard(get_game_sync_key(game))
+    def _defer_sync_conflict(self, game: dict, dialog, seconds: int = 300):
+        game_key = get_game_sync_key(game)
+        snooze_game_sync_conflict(self.cfg, game, seconds=seconds)
+        self._open_conflict_dialogs.discard(game_key)
         dialog.destroy()
+
+    def _resolve_sync_conflict(self, game: dict, mode: str, dialog):
+        if self._io_busy:
+            self._notify_io_busy()
+            return
+        game_key = get_game_sync_key(game)
+        sync_root = get_effective_sync_root(self.cfg.get("sync_folder", ""), self.cfg, ensure=True)
+        if not sync_root:
+            self._show_warning(
+                self.bi("处理中断", "Sync Backend Missing"),
+                self.bi("请先配置同步文件夹或启用 WebDAV 远程同步。", "Please configure a sync folder or enable WebDAV remote sync first."),
+            )
+            return
+
+        self._set_io_busy(True)
+        self._resolving_sync_conflicts.add(game_key)
+        self._open_conflict_dialogs.discard(game_key)
+        dialog.destroy()
+
+        def _done_success(result: str):
+            self._set_io_busy(False)
+            self._resolving_sync_conflicts.discard(game_key)
+            self._on_backups_changed(dict(game))
+            self._show_info(
+                self.bi("冲突已处理", "Conflict Resolved"),
+                self.bi(f"「{game['name']}」{result}", f"{game['name']}: {result}"),
+            )
+            self._refresh_proc_status()
+
+        def _done_error(err: str):
+            self._set_io_busy(False)
+            self._resolving_sync_conflicts.discard(game_key)
+            self._show_error(
+                self.bi("处理失败", "Resolution Failed"),
+                self.bi(
+                    f"「{game['name']}」处理冲突失败：\n{err}",
+                    f"Failed to resolve conflict for {game['name']}:\n{err}",
+                ),
+            )
+
+        def _worker():
+            try:
+                result = sync_game_save(game, sync_root, mode, cfg=self.cfg)
+                self.after(0, lambda r=result: _done_success(r))
+            except Exception as e:
+                self.after(0, lambda err=f"{type(e).__name__}: {e}": _done_error(err))
+
+        threading.Thread(target=_worker, daemon=True).start()
 
     def _show_process_diagnose(self):
         """弹出进程检测诊断窗口"""
@@ -9130,6 +9368,7 @@ class SteamSaveManager(ctk.CTk):
         pending_conflicts = sum(
             1 for g in self.cfg.get("games", [])
             if get_game_sync_state(self.cfg, g).get("pending_conflict")
+            and not is_game_sync_conflict_snoozed(self.cfg, g)
         )
         retry_count = len(get_sync_retry_queue(self.cfg))
         if pending_conflicts or retry_count:
@@ -9253,22 +9492,16 @@ class SteamSaveManager(ctk.CTk):
             self._prompt_update_download(manifest)
 
     def _prompt_update_download(self, manifest: dict):
-        notes = manifest.get("notes", "").strip() or self.bi("暂无更新说明", "No release notes")
         self._set_about_update_state(
             text=self.bi(f"更新状态：发现新版本 v{manifest['version']}",
                          f"Update status: new version found v{manifest['version']}"),
             busy=False,
         )
-        ok = self._ask_yes_no(
-            self.bi("发现新版本", "Update Available"),
-            self.bi(
-                f"发现新版本：v{manifest['version']}\n当前版本：v{VERSION}\n\n更新说明：\n{notes}\n\n是否立即下载？",
-                f"New version found: v{manifest['version']}\nCurrent version: v{VERSION}\n\nRelease notes:\n{notes}\n\nDownload it now?",
-            ),
-            parent=self._about_dialog,
-        )
-        if ok:
+        action = self._ask_update_action(manifest, parent=self._about_dialog)
+        if action == "download":
             self._download_update(manifest)
+        elif action == "browser":
+            self._open_update_in_browser(manifest)
 
     def _download_update(self, manifest: dict):
         self._set_about_update_state(
@@ -9277,9 +9510,41 @@ class SteamSaveManager(ctk.CTk):
         )
         threading.Thread(target=self._download_update_worker, args=(manifest,), daemon=True).start()
 
+    def _open_update_in_browser(self, manifest: dict):
+        url = str(manifest.get("url", "") or "").strip()
+        if not url:
+            self._show_error(
+                self.bi("打开浏览器失败", "Failed to Open Browser"),
+                self.bi("更新下载链接为空。", "The update download link is empty."),
+                parent=self._about_dialog,
+            )
+            return
+        try:
+            ok = webbrowser.open(url)
+            if not ok:
+                raise RuntimeError(self.bi("系统未返回成功状态", "The system did not report success"))
+            self._set_about_update_state(
+                text=self.bi("更新状态：已跳转浏览器下载", "Update status: opened in browser"),
+                busy=False,
+            )
+            self._show_info(
+                self.bi("浏览器下载", "Browser Download"),
+                self.bi(f"已在浏览器中打开下载链接：\n{url}", f"The download link has been opened in your browser:\n{url}"),
+                parent=self._about_dialog,
+            )
+        except Exception as e:
+            self._show_error(
+                self.bi("打开浏览器失败", "Failed to Open Browser"),
+                self.bi(
+                    f"无法在浏览器中打开下载链接：\n{type(e).__name__}: {e}",
+                    f"Could not open the download link in your browser:\n{type(e).__name__}: {e}",
+                ),
+                parent=self._about_dialog,
+            )
+
     def _download_update_worker(self, manifest: dict):
         try:
-            target = download_update_package(manifest, CONFIG_DIR / "updates")
+            target = download_update_package(manifest, get_update_download_dir())
         except Exception as e:
             self.after(0, lambda: (
                 self._set_about_update_state(
@@ -9320,8 +9585,23 @@ class SteamSaveManager(ctk.CTk):
     def _launch_downloaded_update(self, target: Path):
         try:
             if sys.platform == "win32":
-                escaped_target = str(target).replace("'", "''")
-                command = f"Start-Sleep -Seconds 1; Start-Process -FilePath '{escaped_target}'"
+                current_exe = Path(os.path.abspath(sys.argv[0]))
+                backup_old = True
+                if getattr(sys, "frozen", False) and current_exe.resolve() != target.resolve():
+                    backup_old = self._ask_yes_no(
+                        self.bi("备份旧版本", "Back Up Current Version"),
+                        self.bi(
+                            f"是否在升级前备份当前版本？\n\n将保存为：\n{current_exe.with_suffix(current_exe.suffix + '.old')}",
+                            f"Back up the current version before updating?\n\nIt will be saved as:\n{current_exe.with_suffix(current_exe.suffix + '.old')}",
+                        ),
+                        parent=self._about_dialog,
+                    )
+                    command = _build_windows_replace_and_launch_command(
+                        target, current_exe, backup_old=backup_old
+                    )
+                else:
+                    escaped_target = str(target).replace("'", "''")
+                    command = f"Start-Sleep -Seconds 1; Start-Process -FilePath '{escaped_target}'"
                 subprocess.Popen(
                     ["powershell", "-WindowStyle", "Hidden", "-Command", command],
                     creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
@@ -10294,9 +10574,18 @@ class SteamSaveManager(ctk.CTk):
                       font=font(12), command=self._toggle_autostart).grid(
             row=6, column=0, padx=22, sticky="w")
 
-        _label(system, 7, "backup_rotation")
+        self._autostart_minimize_var = ctk.StringVar(
+            value="on" if self.cfg.get("autostart_minimize", True) else "off"
+        )
+        ctk.CTkSwitch(
+            system, text=self.t("autostart_minimize_desc"),
+            variable=self._autostart_minimize_var, onvalue="on", offvalue="off",
+            font=font(12), command=self._toggle_autostart_minimize
+        ).grid(row=7, column=0, padx=22, pady=(6, 0), sticky="w")
+
+        _label(system, 8, "backup_rotation")
         rf = _row(system)
-        rf.grid(row=8, column=0, padx=22, sticky="w")
+        rf.grid(row=9, column=0, padx=22, sticky="w")
         ctk.CTkLabel(rf, text=self.t("max_backups"), font=font(12)).pack(side="left")
         self._max_bk_e = ctk.CTkEntry(rf, width=64, font=font(12))
         self._max_bk_e.insert(0, str(self.cfg.get("max_backups_per_game", 20)))
@@ -10305,7 +10594,7 @@ class SteamSaveManager(ctk.CTk):
         ctk.CTkLabel(rf, text=self.t("max_backups_suffix"), font=font(12)).pack(side="left")
 
         rf2 = _row(system)
-        rf2.grid(row=9, column=0, padx=22, pady=(6, 0), sticky="w")
+        rf2.grid(row=10, column=0, padx=22, pady=(6, 0), sticky="w")
         ctk.CTkLabel(rf2, text=self.t("max_backup_size"), font=font(12)).pack(side="left")
         self._max_size_e = ctk.CTkEntry(rf2, width=64, font=font(12))
         self._max_size_e.insert(0, str(self.cfg.get("max_backup_size_gb", 10.0)))
@@ -10313,9 +10602,9 @@ class SteamSaveManager(ctk.CTk):
         self._bind_entry_apply(self._max_size_e, self._apply_max_backup_size)
         ctk.CTkLabel(rf2, text=self.t("max_backup_size_suffix"), font=font(12)).pack(side="left")
 
-        _label(system, 10, "backup_storage")
+        _label(system, 11, "backup_storage")
         bpf = _row(system)
-        bpf.grid(row=11, column=0, padx=22, sticky="ew")
+        bpf.grid(row=12, column=0, padx=22, sticky="ew")
         self._backup_path_e = ctk.CTkEntry(
             bpf, width=420, font=font(12),
             placeholder_text=self.t("backup_storage_placeholder"))
@@ -10328,13 +10617,13 @@ class SteamSaveManager(ctk.CTk):
             system, text=self.t("current_path", path=str(BACKUP_ROOT)),
             font=font(11), text_color=C_SUBTLE_TEXT)
         self._backup_current_path_label.grid(
-            row=12, column=0, padx=22, pady=(6, 18), sticky="w")
+            row=13, column=0, padx=22, pady=(6, 18), sticky="w")
         ctk.CTkButton(
             system, text=self.bi("关于软件", "About"),
             width=120, height=34, font=font(12, "bold"),
             corner_radius=8, fg_color=BTN_PRIMARY, hover_color=BTN_PRIMARY_H,
             command=self._show_about_dialog
-        ).grid(row=13, column=0, padx=22, pady=(0, 18), sticky="w")
+        ).grid(row=14, column=0, padx=22, pady=(0, 18), sticky="w")
 
 
 
@@ -10629,6 +10918,10 @@ class SteamSaveManager(ctk.CTk):
             self._show_error(self.t("settings_failed_title"), str(e))
             self._autostart_var.set("on" if not en else "off")
 
+    def _toggle_autostart_minimize(self):
+        self.cfg["autostart_minimize"] = self._autostart_minimize_var.get() == "on"
+        save_config(self.cfg)
+
     def _on_theme(self, val):
         t = self._theme_code(val)
         ctk.set_appearance_mode(t)
@@ -10689,7 +10982,9 @@ class SteamSaveManager(ctk.CTk):
         self._restart_sync_runtime()
 
     def _manual_sync_all(self):
-        if self._io_busy: return
+        if self._io_busy:
+            self._notify_io_busy()
+            return
         sf = get_effective_sync_root(self.cfg.get("sync_folder", ""), self.cfg, ensure=True)
         if not sf:
             issue = get_sync_backend_issue(self.cfg.get("sync_folder", ""), self.cfg)
@@ -10697,6 +10992,8 @@ class SteamSaveManager(ctk.CTk):
                 msg = self.bi("WebDAV 已启用，但当前运行环境缺少 webdavclient3 组件", "WebDAV is enabled, but webdavclient3 is unavailable in the current runtime")
             elif issue == "webdav_url_missing":
                 msg = self.bi("WebDAV 已启用，但服务器地址为空", "WebDAV is enabled, but the server URL is empty")
+            elif issue == "webdav_credentials_incomplete":
+                msg = self.bi("WebDAV 用户名或密码不完整", "WebDAV username or password is incomplete")
             else:
                 msg = self.bi("请先配置同步文件夹或启用 WebDAV 远程同步", "Please configure a sync folder or enable WebDAV remote sync")
             self._show_warning(
@@ -10735,7 +11032,9 @@ class SteamSaveManager(ctk.CTk):
         self._show_error(self.bi("同步失败", "Sync Failed"), self.bi(f"同步过程中出错：\n{err}", f"An error occurred during sync:\n{err}"))
 
     def _manual_sync_one(self, idx):
-        if self._io_busy: return
+        if self._io_busy:
+            self._notify_io_busy()
+            return
         g = dict(self.cfg["games"][idx])
         sf = get_effective_sync_root(self.cfg.get("sync_folder", ""), self.cfg, ensure=True)
         if not sf:
@@ -10744,6 +11043,8 @@ class SteamSaveManager(ctk.CTk):
                 msg = self.bi("WebDAV 已启用，但当前运行环境缺少 webdavclient3 组件", "WebDAV is enabled, but webdavclient3 is unavailable in the current runtime")
             elif issue == "webdav_url_missing":
                 msg = self.bi("WebDAV 已启用，但服务器地址为空", "WebDAV is enabled, but the server URL is empty")
+            elif issue == "webdav_credentials_incomplete":
+                msg = self.bi("WebDAV 用户名或密码不完整", "WebDAV username or password is incomplete")
             else:
                 msg = self.bi("请先配置同步文件夹或启用 WebDAV 远程同步", "Please configure a sync folder or enable WebDAV remote sync")
             self._show_warning(
