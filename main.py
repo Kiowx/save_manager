@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Steam 游戏存档备份管理器 v1.3.7 — 通用版"""
+"""Steam 游戏存档备份管理器 v1.3.8 — 通用版"""
 
 import os
 import sys
@@ -29,7 +29,7 @@ import tkinter
 import weakref
 import uuid
 from pathlib import Path, PurePosixPath
-from typing import Optional
+from typing import Any, Optional
 
 try:
     import winreg
@@ -69,6 +69,10 @@ try:
     HAS_WATCHDOG = True
 except ImportError:
     HAS_WATCHDOG = False
+    Observer = None
+
+    class FileSystemEventHandler:
+        pass
 
 try:
     from webdav3.client import Client as WebDAVClient
@@ -81,7 +85,7 @@ except ImportError as exc:
 # ══════════════════════════════════════════════
 
 APP_NAME = "Steam Save Manager"
-VERSION = "1.3.7"
+VERSION = "1.3.8"
 APP_DIR = Path(os.path.dirname(os.path.abspath(sys.argv[0])))
 LEGACY_CONFIG_DIR = Path.home() / ".steam_save_manager"
 STARTUP_AUTOSTART_FLAG = "--startup-launch"
@@ -119,6 +123,11 @@ def _build_autostart_command(script_path: str, python_path: str) -> str:
     if not os.path.isfile(pythonw):
         pythonw = python_path
     return f'"{pythonw}" "{script_path}" {STARTUP_AUTOSTART_FLAG}'
+
+
+def _join_thread(thread: Optional[threading.Thread], timeout: float = 1.0):
+    if thread and thread.is_alive() and thread is not threading.current_thread():
+        thread.join(timeout=timeout)
 
 
 CONFIG_DIR = _resolve_config_dir()
@@ -2100,6 +2109,69 @@ def get_game_storage_key(game_or_name, game_uid: str = "", storage_key: str = ""
     return sanitize(name).strip() or "game"
 
 
+def get_game_runtime_key(game: Optional[dict]) -> str:
+    if not isinstance(game, dict):
+        return ""
+    appid = str(game.get("appid", "") or "").strip()
+    storage_key = get_game_storage_key(game)
+    if appid:
+        return f"appid:{appid}|storage:{storage_key}"
+    return f"storage:{storage_key}"
+
+
+def _normalize_monitor_process_name(value: str) -> str:
+    raw = str(value or "").strip().strip('"').strip("'")
+    if not raw:
+        return ""
+    return os.path.basename(raw).lower()
+
+
+def _monitor_process_variants(value: str) -> set[str]:
+    clean = _normalize_monitor_process_name(value)
+    if not clean:
+        return set()
+    root, ext = os.path.splitext(clean)
+    if ext:
+        return {clean, root}
+    return {clean, f"{clean}.exe"}
+
+
+def normalize_monitor_processes(values) -> list[str]:
+    if isinstance(values, str):
+        raw_items = re.split(r"[\r\n,;|]+", values)
+    elif isinstance(values, list):
+        raw_items = values
+    else:
+        raw_items = []
+    normalized = []
+    seen = set()
+    for item in raw_items:
+        clean = _normalize_monitor_process_name(str(item or ""))
+        if not clean or clean in seen:
+            continue
+        seen.add(clean)
+        normalized.append(clean)
+    return normalized
+
+
+def get_game_monitor_processes(game: Optional[dict]) -> list[str]:
+    if not isinstance(game, dict):
+        return []
+    return normalize_monitor_processes(game.get("monitor_processes", []))
+
+
+def set_game_monitor_processes(game: dict, values):
+    processes = normalize_monitor_processes(values)
+    if processes:
+        game["monitor_processes"] = processes
+    else:
+        game.pop("monitor_processes", None)
+
+
+def format_monitor_processes(values) -> str:
+    return ", ".join(normalize_monitor_processes(values))
+
+
 def _normalize_spec_signature(specs: list[dict]) -> tuple:
     return tuple(
         (
@@ -3602,12 +3674,15 @@ def load_config() -> dict:
                 changed = True
             old_primary = game.get("save_path", "")
             old_specs = list(game.get("save_specs", [])) if isinstance(game.get("save_specs", []), list) else []
+            old_monitor = list(game.get("monitor_processes", [])) if isinstance(game.get("monitor_processes", []), list) else game.get("monitor_processes", "")
             normalized_specs = get_game_save_specs(game, existing_only=False)
             set_game_save_specs(game, normalized_specs)
+            set_game_monitor_processes(game, old_monitor)
             if (
                 game.get("save_path", "") != old_primary
                 or "save_paths" not in game
                 or old_specs != normalized_specs
+                or old_monitor != game.get("monitor_processes", [])
             ):
                 changed = True
 
@@ -5861,6 +5936,57 @@ def migrate_backups(old_root: Path, new_root: Path) -> int:
     return moved
 
 
+def _restore_safety_dir(target: Path) -> Path:
+    stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    candidate = target.parent / f"{target.name}_pre_restore_{stamp}"
+    suffix = 1
+    while candidate.exists():
+        candidate = target.parent / f"{target.name}_pre_restore_{stamp}_{suffix}"
+        suffix += 1
+    return candidate
+
+
+def _zip_safe_restore_path(base_dir: Path, relative_name: str) -> Path:
+    normalized = (relative_name or "").replace("\\", "/")
+    rel_path = PurePosixPath(normalized)
+    if not normalized or rel_path.is_absolute():
+        raise ValueError(f"Invalid archive entry: {relative_name}")
+    parts = [part for part in rel_path.parts if part not in ("", ".")]
+    if not parts or any(part == ".." for part in parts):
+        raise ValueError(f"Unsafe archive entry: {relative_name}")
+    base_resolved = base_dir.resolve(strict=False)
+    dest = base_dir.joinpath(*parts)
+    try:
+        dest.resolve(strict=False).relative_to(base_resolved)
+    except ValueError as exc:
+        raise ValueError(f"Archive entry escapes target directory: {relative_name}") from exc
+    return dest
+
+
+def _plan_backup_restore_entries(zf: zipfile.ZipFile, target_specs: list[dict]) -> list[tuple[int, dict, str, Path]]:
+    members = [info.filename for info in zf.infolist() if info.filename and not info.is_dir()]
+    entries: list[tuple[int, dict, str, Path]] = []
+    is_multi = any(name.startswith("__multi__/p") for name in members)
+    if not is_multi:
+        spec = target_specs[0]
+        base_dir = Path(spec["base"])
+        for member in members:
+            entries.append((0, spec, member, _zip_safe_restore_path(base_dir, member)))
+        return entries
+    for member in members:
+        match = re.match(r"^__multi__/p(\d+)/(.*)$", member)
+        if not match:
+            continue
+        idx = int(match.group(1)) - 1
+        rel = match.group(2)
+        if idx < 0 or not rel:
+            continue
+        target_idx = idx if idx < len(target_specs) else 0
+        spec = target_specs[target_idx]
+        entries.append((target_idx, spec, member, _zip_safe_restore_path(Path(spec["base"]), rel)))
+    return entries
+
+
 def restore_backup(zip_path: str, target_dir):
     if isinstance(target_dir, list) and target_dir and isinstance(target_dir[0], dict):
         target_specs = get_game_save_specs({"save_specs": target_dir}, existing_only=False)
@@ -5871,43 +5997,26 @@ def restore_backup(zip_path: str, target_dir):
     if not target_specs:
         return
 
-    for spec in target_specs:
-        target = Path(spec["base"])
-        if target.exists():
-            safety = target.parent / (
-                target.name + "_pre_restore_" +
-                datetime.datetime.now().strftime("%Y%m%d_%H%M%S"))
-            shutil.copytree(target, safety)
-        else:
-            target.mkdir(parents=True, exist_ok=True)
-
     with zipfile.ZipFile(zip_path, "r") as zf:
-        names = [n for n in zf.namelist() if n and not n.endswith("/")]
-        is_multi = any(n.startswith("__multi__/p") for n in names)
-        if not is_multi:
-            spec = target_specs[0]
-            if not _save_spec_covers_entire_dir(spec):
-                _remove_matching_spec_files(spec)
-            zf.extractall(Path(spec["base"]))
+        restore_entries = _plan_backup_restore_entries(zf, target_specs)
+        if not restore_entries:
             return
-
+        touched_dirs: dict[str, Path] = {}
+        for _, spec, _, _ in restore_entries:
+            target = Path(spec["base"])
+            touched_dirs[os.path.normcase(os.path.normpath(str(target)))] = target
+        for target in touched_dirs.values():
+            if target.exists():
+                shutil.copytree(target, _restore_safety_dir(target))
+            else:
+                target.mkdir(parents=True, exist_ok=True)
         prepared_targets = set()
-        for member in names:
-            match = re.match(r"^__multi__/p(\d+)/(.*)$", member)
-            if not match:
+        for target_idx, spec, _, _ in restore_entries:
+            if target_idx in prepared_targets:
                 continue
-            idx = int(match.group(1)) - 1
-            rel = match.group(2)
-            if not rel:
-                continue
-            if idx < 0:
-                continue
-            target_idx = idx if idx < len(target_specs) else 0
-            spec = target_specs[target_idx]
-            if target_idx not in prepared_targets and not _save_spec_covers_entire_dir(spec):
-                _remove_matching_spec_files(spec)
-                prepared_targets.add(target_idx)
-            dest = Path(spec["base"]) / rel
+            _remove_matching_spec_files(spec)
+            prepared_targets.add(target_idx)
+        for _, _, member, dest in restore_entries:
             dest.parent.mkdir(parents=True, exist_ok=True)
             with zf.open(member) as src, open(dest, "wb") as dst:
                 shutil.copyfileobj(src, dst)
@@ -6036,6 +6145,7 @@ class GameProcessMonitor:
         self._on_backups_changed_cb = on_backups_changed
 
     def start(self):
+        _join_thread(self._thread, timeout=0.2)
         if self._thread and self._thread.is_alive():
             return
         self._stop_event.clear()
@@ -6043,8 +6153,11 @@ class GameProcessMonitor:
         self._thread.start()
 
     def stop(self):
+        thread = self._thread
         self._stop_event.set()
-        self._thread = None
+        _join_thread(thread, timeout=2.0)
+        if self._thread is thread and (thread is None or not thread.is_alive()):
+            self._thread = None
         self._running_games.clear()
         self._upload_guards.clear()
 
@@ -6144,6 +6257,37 @@ class GameProcessMonitor:
             last_sig = current_sig
 
         return max(0.0, time.monotonic() - start)
+
+    def _get_tracked_games(self) -> list[tuple[str, dict]]:
+        tracked = []
+        for game in self.cfg.get("games", []):
+            if not isinstance(game, dict):
+                continue
+            key = get_game_runtime_key(game)
+            if not key:
+                continue
+            tracked.append((key, game))
+        return tracked
+
+    @staticmethod
+    def _process_name_candidates(proc) -> set[str]:
+        candidates = set()
+        try:
+            name = (proc.info.get("name") or "").strip()
+            clean = _normalize_monitor_process_name(name)
+            if clean:
+                candidates.update(_monitor_process_variants(clean))
+        except Exception:
+            pass
+        try:
+            cmdline = proc.cmdline()
+            if cmdline:
+                first = _normalize_monitor_process_name(cmdline[0])
+                if first:
+                    candidates.update(_monitor_process_variants(first))
+        except Exception:
+            pass
+        return candidates
 
     # ── 策略 1: Steam 注册表 RunningAppID ──
     @staticmethod
@@ -6260,7 +6404,7 @@ class GameProcessMonitor:
         return [w for w in raw
                 if (len(w) >= 3 or w.isdigit()) and w not in GENERIC_WORDS]
 
-    def _get_appids_from_process_names(self) -> set[str]:
+    def _get_runtime_keys_from_process_names(self, tracked_games: list[tuple[str, dict]]) -> set[str]:
         """
         通过进程名关键词匹配检测正在运行的游戏。
         作为兜底方案，覆盖非 Steam 启动或 overlay 未启动的场景。
@@ -6270,13 +6414,10 @@ class GameProcessMonitor:
             return matched
         # 构建关键词映射
         game_kw_map = []
-        for g in self.cfg.get("games", []):
-            aid = g.get("appid", "")
-            if not aid:
-                continue
+        for runtime_key, g in tracked_games:
             kws = self._extract_keywords(g["name"])
             if kws:
-                game_kw_map.append((kws, aid))
+                game_kw_map.append((kws, runtime_key))
         if not game_kw_map:
             return matched
 
@@ -6288,41 +6429,76 @@ class GameProcessMonitor:
                 if any(name.startswith(p) for p in self.SKIP_PREFIXES):
                     continue
                 proc_base = name.replace(".exe", "")
-                for kws, aid in game_kw_map:
+                for kws, runtime_key in game_kw_map:
                     hits = sum(1 for kw in kws if kw in proc_base)
                     if hits >= 2 or (hits > 0 and hits / len(kws) >= 0.5):
-                        matched.add(aid)
+                        matched.add(runtime_key)
                         break
             except (psutil.NoSuchProcess, psutil.AccessDenied,
                     psutil.ZombieProcess):
                 continue
         return matched
 
+    def _get_runtime_keys_from_custom_processes(self, tracked_games: list[tuple[str, dict]]) -> set[str]:
+        matched: set[str] = set()
+        if not HAS_PSUTIL:
+            return matched
+        process_map: list[tuple[set[str], str]] = []
+        for runtime_key, game in tracked_games:
+            variants = set()
+            for process_name in get_game_monitor_processes(game):
+                variants.update(_monitor_process_variants(process_name))
+            if variants:
+                process_map.append((variants, runtime_key))
+        if not process_map:
+            return matched
+
+        for proc in psutil.process_iter(["pid", "name"]):
+            try:
+                candidates = self._process_name_candidates(proc)
+                if not candidates:
+                    continue
+                for variants, runtime_key in process_map:
+                    if candidates & variants:
+                        matched.add(runtime_key)
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                continue
+        return matched
+
     def _find_running_games(self) -> set[str]:
         """
-        综合四层检测策略，返回当前正在运行的游戏 AppID 集合。
+        综合多层检测策略，返回当前正在运行的游戏记录键集合。
         """
-        known_appids = {g.get("appid") for g in self.cfg.get("games", [])
-                        if g.get("appid")}
+        tracked_games = self._get_tracked_games()
+        appid_to_keys: dict[str, set[str]] = {}
+        for runtime_key, game in tracked_games:
+            appid = str(game.get("appid", "") or "").strip()
+            if appid:
+                appid_to_keys.setdefault(appid, set()).add(runtime_key)
+        known_appids = set(appid_to_keys.keys())
         running: set[str] = set()
 
         # 策略 1a: 注册表 RunningAppID
         reg_appid = self._get_running_appid_from_registry()
         if reg_appid and reg_appid in known_appids:
-            running.add(reg_appid)
+            running.update(appid_to_keys.get(reg_appid, set()))
 
         # 策略 1b: Steam Apps 注册表逐个检查 Running 值
         apps_running = self._get_running_appids_from_apps_registry(known_appids)
-        running.update(apps_running)
+        for appid in apps_running:
+            running.update(appid_to_keys.get(appid, set()))
 
         # 策略 2: gameoverlayui.exe 命令行（支持多游戏并行）
         overlay_appids = self._get_appids_from_overlay()
-        running.update(overlay_appids & known_appids)
+        for appid in overlay_appids & known_appids:
+            running.update(appid_to_keys.get(appid, set()))
 
-        # 策略 3: 进程名关键词匹配（兜底）
+        # 策略 3: 手动指定的进程名（支持非 Steam 游戏和进程误识别修正）
+        running.update(self._get_runtime_keys_from_custom_processes(tracked_games))
+
+        # 策略 4: 进程名关键词匹配（兜底）
         if not running:
-            proc_appids = self._get_appids_from_process_names()
-            running.update(proc_appids)
+            running.update(self._get_runtime_keys_from_process_names(tracked_games))
 
         return running
 
@@ -6336,22 +6512,31 @@ class GameProcessMonitor:
         lines.append("")
 
         # 已添加游戏
-        games = self.cfg.get("games", [])
-        known = {g.get("appid"): g.get("name", "?") for g in games if g.get("appid")}
-        lines.append(f"已添加游戏 ({len(known)} 个):" if zh else f"Tracked games ({len(known)}):")
-        for aid, name in known.items():
+        games = [g for g in self.cfg.get("games", []) if isinstance(g, dict)]
+        tracked_games = self._get_tracked_games()
+        known = {get_game_runtime_key(g): g.get("name", "?") for g in games}
+        known_appids = {str(g.get("appid", "") or "").strip(): g.get("name", "?") for g in games if str(g.get("appid", "") or "").strip()}
+        lines.append(f"已添加游戏 ({len(games)} 个):" if zh else f"Tracked games ({len(games)}):")
+        for runtime_key, game in tracked_games:
+            name = game.get("name", "?")
             kws = self._extract_keywords(name)
+            monitor_hint = get_game_monitor_processes(game)
+            suffix = (
+                f" | 自定义进程: {monitor_hint}" if zh and monitor_hint else
+                f" | custom processes: {monitor_hint}" if monitor_hint else
+                ""
+            )
             lines.append(
-                f"  🎮 {name} (AppID: {aid}) -> 关键词: {kws}"
+                f"  🎮 {name} ({runtime_key}) -> 关键词: {kws}{suffix}"
                 if zh else
-                f"  🎮 {name} (AppID: {aid}) -> keywords: {kws}"
+                f"  🎮 {name} ({runtime_key}) -> keywords: {kws}{suffix}"
             )
         lines.append("")
 
         # 策略 1a: 注册表 RunningAppID
         reg_appid = self._get_running_appid_from_registry()
         if reg_appid:
-            reg_name = known.get(reg_appid, "未添加" if zh else "Not tracked")
+            reg_name = known_appids.get(reg_appid, "未添加" if zh else "Not tracked")
             lines.append(
                 f"✅ 注册表 RunningAppID = {reg_appid} ({reg_name})"
                 if zh else
@@ -6362,7 +6547,7 @@ class GameProcessMonitor:
         lines.append("")
 
         # 策略 1b: Steam Apps 注册表 Running 值
-        apps_running = self._get_running_appids_from_apps_registry(set(known.keys()))
+        apps_running = self._get_running_appids_from_apps_registry(set(known_appids.keys()))
         if apps_running:
             lines.append(
                 f"✅ Steam Apps 注册表检测到 {len(apps_running)} 个游戏运行中:"
@@ -6370,7 +6555,7 @@ class GameProcessMonitor:
                 f"✅ Steam Apps registry detected {len(apps_running)} running game(s):"
             )
             for aid in apps_running:
-                name = known.get(aid, "未添加" if zh else "Not tracked")
+                name = known_appids.get(aid, "未添加" if zh else "Not tracked")
                 lines.append(f"  AppID: {aid} ({name})")
         else:
             lines.append("❌ Steam Apps 注册表未检测到游戏运行" if zh else "❌ Steam Apps registry did not detect any running game")
@@ -6385,23 +6570,36 @@ class GameProcessMonitor:
                 f"✅ gameoverlayui.exe detected {len(overlay_ids)} game(s):"
             )
             for aid in overlay_ids:
-                name = known.get(aid, "未添加" if zh else "Not tracked")
+                name = known_appids.get(aid, "未添加" if zh else "Not tracked")
                 lines.append(f"  AppID: {aid} ({name})")
         else:
             lines.append("❌ 未检测到 gameoverlayui.exe 或无 AppID 参数" if zh else "❌ gameoverlayui.exe was not found, or it had no AppID argument")
         lines.append("")
 
-        # 策略 3: 进程名匹配
-        proc_ids = self._get_appids_from_process_names()
+        # 策略 3: 自定义进程匹配
+        custom_ids = self._get_runtime_keys_from_custom_processes(tracked_games)
+        if custom_ids:
+            lines.append(
+                f"✅ 自定义进程匹配到 {len(custom_ids)} 个游戏:"
+                if zh else
+                f"✅ Custom process matching found {len(custom_ids)} game(s):"
+            )
+            for runtime_key in custom_ids:
+                lines.append(f"  {runtime_key} ({known.get(runtime_key, '未添加' if zh else 'Not tracked')})")
+        else:
+            lines.append("❌ 自定义进程未匹配到游戏" if zh else "❌ Custom process matching did not find any game")
+        lines.append("")
+
+        # 策略 4: 进程名匹配
+        proc_ids = self._get_runtime_keys_from_process_names(tracked_games)
         if proc_ids:
             lines.append(
                 f"✅ 进程名关键词匹配到 {len(proc_ids)} 个游戏:"
                 if zh else
                 f"✅ Process-name matching found {len(proc_ids)} game(s):"
             )
-            for aid in proc_ids:
-                name = known.get(aid, "未添加" if zh else "Not tracked")
-                lines.append(f"  AppID: {aid} ({name})")
+            for runtime_key in proc_ids:
+                lines.append(f"  {runtime_key} ({known.get(runtime_key, '未添加' if zh else 'Not tracked')})")
         else:
             lines.append("❌ 进程名关键词未匹配到游戏" if zh else "❌ Process-name matching did not find any game")
         lines.append("")
@@ -6414,9 +6612,9 @@ class GameProcessMonitor:
                 if zh else
                 f"🎯 Final result: {len(total)} game(s) detected as running:"
             )
-            for aid in total:
-                name = known.get(aid, "未添加" if zh else "Not tracked")
-                lines.append(f"  ✅ {name} (AppID: {aid})")
+            for runtime_key in total:
+                name = known.get(runtime_key, "未添加" if zh else "Not tracked")
+                lines.append(f"  ✅ {name} ({runtime_key})")
         else:
             lines.append("🎯 综合结果：未检测到游戏运行" if zh else "🎯 Final result: no running game detected")
             lines.append("")
@@ -6429,9 +6627,9 @@ class GameProcessMonitor:
         return "\n".join(lines)
 
     def _monitor_loop(self):
-        game_by_appid = {
-            g.get("appid"): g
-            for g in self.cfg.get("games", []) if g.get("appid")
+        game_by_runtime_key = {
+            get_game_runtime_key(g): g
+            for g in self.cfg.get("games", []) if isinstance(g, dict) and get_game_runtime_key(g)
         }
         sync_folder = get_effective_sync_root(self.cfg.get("sync_folder", ""), self.cfg, ensure=True)
         def _log(msg: str):
@@ -6457,7 +6655,7 @@ class GameProcessMonitor:
             f"📂 Sync backend: {sync_folder or 'Not set'}",
         ))
         if self._running_games:
-            _names = [game_by_appid.get(a, {}).get("name", a) for a in self._running_games]
+            _names = [game_by_runtime_key.get(a, {}).get("name", a) for a in self._running_games]
             self.sync_log.append(f"[{_ts}] " + bilingual_cfg(
                 self.cfg,
                 f"🟢 监控启动，已在运行: {', '.join(_names)}",
@@ -6465,7 +6663,7 @@ class GameProcessMonitor:
             ))
             # 对已在运行的游戏也触发一次下载（确保云端存档已拉取到本地）
             for aid in self._running_games:
-                g = game_by_appid.get(aid)
+                g = game_by_runtime_key.get(aid)
                 if g and sync_folder:
                     try:
                         guarded = self._arm_upload_guard_after_launch(g, sync_folder)
@@ -6527,9 +6725,9 @@ class GameProcessMonitor:
                         _cb()
                     except Exception:
                         pass
-            game_by_appid = {
-                g.get("appid"): g
-                for g in self.cfg.get("games", []) if g.get("appid")
+            game_by_runtime_key = {
+                get_game_runtime_key(g): g
+                for g in self.cfg.get("games", []) if isinstance(g, dict) and get_game_runtime_key(g)
             }
 
             current = self._find_running_games()
@@ -6538,7 +6736,7 @@ class GameProcessMonitor:
 
             # 新启动的游戏 → 下载云端存档
             for aid in curr_ids - prev_ids:
-                g = game_by_appid.get(aid)
+                g = game_by_runtime_key.get(aid)
                 _ts = datetime.datetime.now().strftime("%H:%M:%S")
                 if g and sync_folder:
                     try:
@@ -6584,7 +6782,7 @@ class GameProcessMonitor:
 
             # 关闭的游戏 → 上传本地存档
             for aid in prev_ids - curr_ids:
-                g = game_by_appid.get(aid)
+                g = game_by_runtime_key.get(aid)
                 _ts = datetime.datetime.now().strftime("%H:%M:%S")
                 if g and sync_folder:
                     try:
@@ -6668,9 +6866,10 @@ class GameProcessMonitor:
 # ══════════════════════════════════════════════
 
 class SaveChangeHandler(FileSystemEventHandler):
-    def __init__(self, game: dict, cooldown: int = 60, on_backup_created=None):
+    def __init__(self, game: dict, cooldown: int = 60, *, cfg: Optional[dict] = None, on_backup_created=None):
         super().__init__()
         self.game = game
+        self.cfg = cfg
         self.cooldown = cooldown
         self.on_backup_created = on_backup_created
         self._last_backup = 0
@@ -6713,7 +6912,7 @@ class SaveChangeHandler(FileSystemEventHandler):
         if now - self._last_backup < self.cooldown:
             return
         self._last_backup = now
-        result = create_backup(self.game, localize_backup_note("文件变动自动备份", cfg_language(None)))
+        result = create_backup(self.game, localize_backup_note("文件变动自动备份", cfg_language(self.cfg)))
         if result and callable(self.on_backup_created):
             try:
                 self.on_backup_created(self.game)
@@ -6775,8 +6974,12 @@ class SteamSaveManager(ctk.CTk):
         clear_startup_caches(self.cfg)
         self.lang = normalize_language(self.cfg.get("language"))
         self.auto_backup_running = False
-        self._stop_event = threading.Event()
-        self._watchers: list[Observer] = []
+        self._auto_stop_event = threading.Event()
+        self._auto_thread: Optional[threading.Thread] = None
+        self._sync_running = False
+        self._sync_stop = threading.Event()
+        self._sync_thread: Optional[threading.Thread] = None
+        self._watchers: list[Any] = []
         self._watch_handlers: list[SaveChangeHandler] = []
         self._detail_refresh_job = None  # 详情页自动刷新定时器
         self._sync_ui_queue: queue.Queue = queue.Queue()
@@ -7250,8 +7453,7 @@ class SteamSaveManager(ctk.CTk):
                 self._start_game_monitor()
         else:
             if self._game_monitor is not None:
-                self._game_monitor.stop()
-                self._game_monitor = None
+                self._stop_game_monitor()
 
     # ─── 侧边栏 ───
     def _build_sidebar(self):
@@ -8563,7 +8765,7 @@ class SteamSaveManager(ctk.CTk):
         return state
 
     def _add_game_dialog(self):
-        d = self._create_popup(self.bi("手动添加游戏", "Add Game Manually"), "700x500")
+        d = self._create_popup(self.bi("手动添加游戏", "Add Game Manually"), "700x560")
         d.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(d, text=self.bi("游戏名称", "Game Name"), font=font(13)).grid(
             row=0, column=0, padx=24, pady=(20, 4), sticky="w")
@@ -8577,6 +8779,22 @@ class SteamSaveManager(ctk.CTk):
             row=4, column=0, padx=24, pady=(12, 4), sticky="w")
         editor = self._create_save_paths_editor(d, width=420)
         editor["frame"].grid(row=5, column=0, padx=24, sticky="ew")
+        ctk.CTkLabel(d, text=self.bi("自定义监控程序（可选）", "Custom Monitor Process (Optional)"), font=font(13)).grid(
+            row=6, column=0, padx=24, pady=(12, 4), sticky="w")
+        pe = ctk.CTkEntry(
+            d, width=620,
+            placeholder_text=self.bi(
+                "例如：game.exe, game-win64-shipping.exe",
+                "For example: game.exe, game-win64-shipping.exe",
+            ),
+        )
+        pe.grid(row=7, column=0, padx=24, sticky="ew")
+        ctk.CTkLabel(
+            d,
+            text=self.bi("填写进程名即可，支持多个，用逗号或换行分隔", "Enter process names only. Multiple names are supported, separated by commas or new lines."),
+            font=font(11),
+            text_color=C_SUBTLE_TEXT,
+        ).grid(row=8, column=0, padx=24, pady=(4, 0), sticky="w")
         def _sv():
             n = ne.get().strip()
             save_paths = editor["get_paths"]()
@@ -8585,6 +8803,7 @@ class SteamSaveManager(ctk.CTk):
             appid = ae.get().strip()
             game = {"name": n, "appid": appid}
             set_game_save_paths(game, save_paths)
+            set_game_monitor_processes(game, pe.get().strip())
             ensure_game_storage_identity(game)
             self.cfg.setdefault("games", []).append(game)
             remember_recognition_path(self.cfg, appid, n, game["save_path"])
@@ -8592,11 +8811,11 @@ class SteamSaveManager(ctk.CTk):
             save_config(self.cfg); self._refresh_games_list(); d.destroy()
         ctk.CTkButton(d, text=self.bi("确认添加", "Add Game"), width=140, height=38, font=font(13, "bold"),
                       corner_radius=10, fg_color=BTN_PRIMARY, hover_color=BTN_PRIMARY_H,
-                      command=_sv).grid(row=6, column=0, padx=24, pady=16)
+                      command=_sv).grid(row=9, column=0, padx=24, pady=16)
 
     def _edit_game_dialog(self, idx):
         g = self.cfg["games"][idx]
-        d = self._create_popup(self.bi("编辑游戏", "Edit Game"), "700x500")
+        d = self._create_popup(self.bi("编辑游戏", "Edit Game"), "700x560")
         d.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(d, text=self.bi("游戏名称", "Game Name"), font=font(13)).grid(
             row=0, column=0, padx=24, pady=(20, 4), sticky="w")
@@ -8606,6 +8825,23 @@ class SteamSaveManager(ctk.CTk):
             row=2, column=0, padx=24, pady=(12, 4), sticky="w")
         editor = self._create_save_paths_editor(d, get_game_save_paths(g, existing_only=False), width=420)
         editor["frame"].grid(row=3, column=0, padx=24, sticky="ew")
+        ctk.CTkLabel(d, text=self.bi("自定义监控程序（可选）", "Custom Monitor Process (Optional)"), font=font(13)).grid(
+            row=4, column=0, padx=24, pady=(12, 4), sticky="w")
+        pe = ctk.CTkEntry(
+            d, width=620,
+            placeholder_text=self.bi(
+                "例如：game.exe, game-win64-shipping.exe",
+                "For example: game.exe, game-win64-shipping.exe",
+            ),
+        )
+        pe.insert(0, format_monitor_processes(g.get("monitor_processes", [])))
+        pe.grid(row=5, column=0, padx=24, sticky="ew")
+        ctk.CTkLabel(
+            d,
+            text=self.bi("填写进程名即可，支持多个，用逗号或换行分隔", "Enter process names only. Multiple names are supported, separated by commas or new lines."),
+            font=font(11),
+            text_color=C_SUBTLE_TEXT,
+        ).grid(row=6, column=0, padx=24, pady=(4, 0), sticky="w")
         def _sv():
             old_game = dict(self.cfg["games"][idx])
             old_game["save_paths"] = list(get_game_save_paths(self.cfg["games"][idx], existing_only=False))
@@ -8615,6 +8851,7 @@ class SteamSaveManager(ctk.CTk):
                 self._show_warning(self.bi("提示", "Notice"), self.bi("请填写名称并至少保留一个存档目录", "Please enter a name and keep at least one save folder")); return
             self.cfg["games"][idx]["name"] = new_name
             set_game_save_paths(self.cfg["games"][idx], new_paths)
+            set_game_monitor_processes(self.cfg["games"][idx], pe.get().strip())
             clear_game_sync_state(self.cfg, old_game)
             if old_game.get("save_path") and old_game.get("save_path") != self.cfg["games"][idx].get("save_path"):
                 exclude_recognition_path(self.cfg, old_game.get("appid", ""), old_game.get("name", ""), old_game.get("save_path", ""))
@@ -8623,7 +8860,7 @@ class SteamSaveManager(ctk.CTk):
             save_config(self.cfg); self._refresh_games_list(); d.destroy()
         ctk.CTkButton(d, text=self.bi("保存", "Save"), width=140, height=38, font=font(13, "bold"),
                       corner_radius=10, fg_color=BTN_PRIMARY, hover_color=BTN_PRIMARY_H,
-                      command=_sv).grid(row=4, column=0, padx=24, pady=16)
+                      command=_sv).grid(row=7, column=0, padx=24, pady=16)
 
     def _delete_game(self, idx):
         g = self.cfg["games"][idx]
@@ -9084,23 +9321,29 @@ class SteamSaveManager(ctk.CTk):
         """检测当前游戏的进程运行状态和同步监控状态并更新 UI"""
         try:
             g = self.cfg["games"][self._detail_idx]
-            appid = g.get("appid", "")
-            if not appid:
-                self._detail_proc_status.configure(text=self.bi("未设置 AppID，无法检测", "AppID is not set, so detection is unavailable"))
+            runtime_key = get_game_runtime_key(g)
+            appid = str(g.get("appid", "") or "").strip()
+            custom_processes = get_game_monitor_processes(g)
+            if not appid and not custom_processes:
+                self._detail_proc_status.configure(text=self.bi("未设置 AppID 或自定义监控程序，无法检测", "No AppID or custom monitor process is configured, so detection is unavailable"))
                 self._detail_proc_badge.configure(
                     text=self.bi("⚠ 未知", "⚠ Unknown"), text_color=("#d97706", "#fbbf24"))
             else:
-                # 创建临时监控器来检测
                 monitor = GameProcessMonitor(self.cfg)
                 running = monitor._find_running_games()
-                if appid in running:
+                detail_suffix = (
+                    self.bi(f"（自定义进程：{', '.join(custom_processes)}）", f"(custom process: {', '.join(custom_processes)})")
+                    if custom_processes else
+                    self.bi(f"(AppID: {appid})", f"(AppID: {appid})")
+                )
+                if runtime_key in running:
                     self._detail_proc_status.configure(
-                        text=self.bi(f"游戏进程运行中 (AppID: {appid})", f"Game process is running (AppID: {appid})"))
+                        text=self.bi(f"游戏进程运行中 {detail_suffix}", f"Game process is running {detail_suffix}"))
                     self._detail_proc_badge.configure(
                         text=self.bi("● 运行中", "● Running"), text_color=("#16a34a", "#4ade80"))
                 else:
                     self._detail_proc_status.configure(
-                        text=self.bi(f"未检测到游戏进程 (AppID: {appid})", f"No game process detected (AppID: {appid})"))
+                        text=self.bi(f"未检测到游戏进程 {detail_suffix}", f"No game process detected {detail_suffix}"))
                     self._detail_proc_badge.configure(
                         text=self.bi("○ 未运行", "○ Not Running"), text_color=C_SUBTLE_TEXT)
         except Exception:
@@ -11080,35 +11323,42 @@ class SteamSaveManager(ctk.CTk):
 
     # ─── 定时备份 ───
     def _start_auto_backup(self):
-        if self.auto_backup_running: return
-        self._stop_event.clear()
+        _join_thread(self._auto_thread, timeout=0.2)
+        if self._auto_thread and self._auto_thread.is_alive():
+            return
+        self._auto_stop_event.clear()
         self.auto_backup_running = True
-        threading.Thread(target=self._auto_loop, daemon=True).start()
+        self._auto_thread = threading.Thread(target=self._auto_loop, daemon=True)
+        self._auto_thread.start()
         self._update_status()
 
     def _stop_auto_backup(self):
-        self._stop_event.set()
+        thread = self._auto_thread
+        self._auto_stop_event.set()
+        _join_thread(thread, timeout=1.0)
+        if self._auto_thread is thread and (thread is None or not thread.is_alive()):
+            self._auto_thread = None
         self.auto_backup_running = False
         self._update_status()
 
     def _auto_loop(self):
-        while not self._stop_event.is_set():
+        while not self._auto_stop_event.is_set():
             iv = self.cfg.get("auto_backup_interval", 30) * 60
-            self._stop_event.wait(iv)
-            if self._stop_event.is_set(): break
-            running_appids = set()
+            self._auto_stop_event.wait(iv)
+            if self._auto_stop_event.is_set(): break
+            running_game_keys = set()
             try:
                 if self._game_monitor:
-                    running_appids = self._game_monitor._find_running_games()
+                    running_game_keys = self._game_monitor._find_running_games()
                 else:
-                    running_appids = GameProcessMonitor(self.cfg)._find_running_games()
+                    running_game_keys = GameProcessMonitor(self.cfg)._find_running_games()
             except Exception:
-                running_appids = set()
+                running_game_keys = set()
             for g in self.cfg.get("games", []):
                 if not g.get("auto_backup", True):
                     continue
-                appid = str(g.get("appid", "") or "").strip()
-                if not appid or appid not in running_appids:
+                runtime_key = get_game_runtime_key(g)
+                if not runtime_key or runtime_key not in running_game_keys:
                     continue
                 result = create_backup(g, self.bi("定时自动备份", "Scheduled Backup"))
                 if result:
@@ -11125,17 +11375,24 @@ class SteamSaveManager(ctk.CTk):
 
     # ─── 自动同步 ───
     def _start_sync(self):
-        if hasattr(self, "_sync_running") and self._sync_running:
+        _join_thread(self._sync_thread, timeout=0.2)
+        if self._sync_thread and self._sync_thread.is_alive():
             return
-        self._sync_stop = threading.Event()
+        self._sync_stop.clear()
         self._sync_running = True
         # smart 模式不需要定时同步，由进程监控触发
         if self.cfg.get("sync_mode") != "smart":
-            threading.Thread(target=self._sync_loop, daemon=True).start()
+            self._sync_thread = threading.Thread(target=self._sync_loop, daemon=True)
+            self._sync_thread.start()
+        else:
+            self._sync_thread = None
 
     def _stop_sync(self):
-        if hasattr(self, "_sync_stop"):
-            self._sync_stop.set()
+        thread = self._sync_thread
+        self._sync_stop.set()
+        _join_thread(thread, timeout=1.0)
+        if self._sync_thread is thread and (thread is None or not thread.is_alive()):
+            self._sync_thread = None
         self._sync_running = False
 
     def _sync_loop(self):
@@ -11176,6 +11433,8 @@ class SteamSaveManager(ctk.CTk):
     # ─── 智能云存档进程监控 ───
     def _start_game_monitor(self):
         self._stop_game_monitor()
+        if self._game_monitor is not None:
+            return
         self._game_monitor = GameProcessMonitor(
             self.cfg,
             on_backups_changed=lambda *a: self.after(0, lambda: self._on_backups_changed(*a) if a else self._on_backups_changed()),
@@ -11183,8 +11442,11 @@ class SteamSaveManager(ctk.CTk):
         self._game_monitor.start()
 
     def _stop_game_monitor(self):
-        if self._game_monitor:
-            self._game_monitor.stop()
+        monitor = self._game_monitor
+        if monitor:
+            monitor.stop()
+            if monitor._thread and monitor._thread.is_alive():
+                return
             self._game_monitor = None
 
     # ─── 文件监控 ───
@@ -11200,6 +11462,7 @@ class SteamSaveManager(ctk.CTk):
             for save_path in get_game_save_paths(g, existing_only=True):
                 handler = SaveChangeHandler(
                     g, cd,
+                    cfg=self.cfg,
                     on_backup_created=lambda game_ref, self=self: self.after(
                         0, lambda gr=dict(game_ref): self._on_backups_changed(gr)
                     ),
@@ -11233,6 +11496,7 @@ class SteamSaveManager(ctk.CTk):
             return
         self._stop_auto_backup()
         self._stop_watchers()
+        self._stop_sync()
         self._stop_game_monitor()
         self.destroy()
 
