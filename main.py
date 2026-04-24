@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Steam 游戏存档备份管理器 v1.3.8 — 通用版"""
+"""Steam 游戏存档备份管理器 v1.3.9 — 通用版"""
 
 import os
 import sys
 import json
 import re
 import shutil
+import logging
 import threading
 import concurrent.futures
 import datetime
@@ -65,14 +66,29 @@ else:
 
 try:
     from watchdog.observers import Observer
-    from watchdog.events import FileSystemEventHandler
+    from watchdog.events import FileSystemEventHandler as _WatchdogHandler
     HAS_WATCHDOG = True
 except ImportError:
     HAS_WATCHDOG = False
     Observer = None
+    _WatchdogHandler = None
 
-    class FileSystemEventHandler:
-        pass
+    class _WatchdogHandler:
+        """空实现，当 watchdog 不可用时的占位类"""
+        def on_modified(self, event):
+            pass
+
+        def on_created(self, event):
+            pass
+
+        def on_deleted(self, event):
+            pass
+
+        def on_moved(self, event):
+            pass
+
+
+FileSystemEventHandler = _WatchdogHandler
 
 try:
     from webdav3.client import Client as WebDAVClient
@@ -85,11 +101,18 @@ except ImportError as exc:
 # ══════════════════════════════════════════════
 
 APP_NAME = "Steam Save Manager"
-VERSION = "1.3.8"
+VERSION = "1.3.9"
 APP_DIR = Path(os.path.dirname(os.path.abspath(sys.argv[0])))
 LEGACY_CONFIG_DIR = Path.home() / ".steam_save_manager"
 STARTUP_AUTOSTART_FLAG = "--startup-launch"
 STARTUP_LAUNCH = STARTUP_AUTOSTART_FLAG in sys.argv
+
+logging.basicConfig(
+    level=logging.WARNING,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+logger = logging.getLogger(__name__)
 
 
 def _can_write_dir(path: Path) -> bool:
@@ -100,7 +123,8 @@ def _can_write_dir(path: Path) -> bool:
             fh.write("ok")
         probe.unlink(missing_ok=True)
         return True
-    except Exception:
+    except Exception as e:
+        logger.debug("检查目录写入权限失败 %s: %s", path, e)
         return False
 
 
@@ -135,6 +159,10 @@ CONFIG_FILE = CONFIG_DIR / "config.json"
 BACKUP_ROOT = APP_DIR / "backups"
 LOCK_FILE = CONFIG_DIR / ".lock"
 UPDATE_MANIFEST_URL = "https://raw.githubusercontent.com/Kiowx/save_manager/refs/heads/main/update/update.json"
+CONFIG_SAVE_LOCK = threading.Lock()
+_CONFIG_BATCH_DEPTH = 0
+_CONFIG_BATCH_DIRTY = False
+_CONFIG_BATCH_CFG_REF: Optional[dict] = None
 
 SUPPORTED_LANGUAGES = ("zh-CN", "en")
 LANGUAGE_NAMES = {
@@ -744,14 +772,23 @@ AUTOSTART_REG_NAME = "SteamSaveManager"
 def get_autostart_enabled() -> bool:
     """检查当前是否已设置开机自启"""
     if sys.platform == "win32" and winreg:
+        key = None
         try:
             key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, AUTOSTART_REG_KEY,
                                  0, winreg.KEY_READ)
             val, _ = winreg.QueryValueEx(key, AUTOSTART_REG_NAME)
-            winreg.CloseKey(key)
             return bool(val)
-        except Exception:
+        except FileNotFoundError:
             return False
+        except Exception as e:
+            logger.warning("检查自启状态失败: %s", e)
+            return False
+        finally:
+            if key is not None:
+                try:
+                    winreg.CloseKey(key)
+                except Exception:
+                    pass
     elif sys.platform == "darwin":
         plist = Path.home() / "Library" / "LaunchAgents" / "com.steamsavemanager.plist"
         return plist.exists()
@@ -766,6 +803,7 @@ def set_autostart_enabled(enable: bool):
     python_path = sys.executable
 
     if sys.platform == "win32" and winreg:
+        key = None
         try:
             key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, AUTOSTART_REG_KEY,
                                  0, winreg.KEY_SET_VALUE)
@@ -777,9 +815,14 @@ def set_autostart_enabled(enable: bool):
                     winreg.DeleteValue(key, AUTOSTART_REG_NAME)
                 except FileNotFoundError:
                     pass
-            winreg.CloseKey(key)
         except Exception as e:
             raise RuntimeError(f"设置自启失败：{e}")
+        finally:
+            if key is not None:
+                try:
+                    winreg.CloseKey(key)
+                except Exception:
+                    pass
 
     elif sys.platform == "darwin":
         plist = Path.home() / "Library" / "LaunchAgents" / "com.steamsavemanager.plist"
@@ -832,24 +875,36 @@ def detect_steam_path() -> str:
             r"SOFTWARE\WOW6432Node\Valve\Steam",
             r"SOFTWARE\Valve\Steam",
         ]:
+            key = None
             try:
                 key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, reg_path)
                 path, _ = winreg.QueryValueEx(key, "InstallPath")
-                winreg.CloseKey(key)
                 if os.path.isdir(path):
                     return path
-            except Exception:
-                continue
+            except Exception as e:
+                logger.warning("读取注册表 %s 失败: %s", reg_path, e)
+            finally:
+                if key is not None:
+                    try:
+                        winreg.CloseKey(key)
+                    except Exception:
+                        pass
         # 也尝试 HKEY_CURRENT_USER
+        key = None
         try:
             key = winreg.OpenKey(winreg.HKEY_CURRENT_USER,
                                  r"SOFTWARE\Valve\Steam")
             path, _ = winreg.QueryValueEx(key, "SteamPath")
-            winreg.CloseKey(key)
             if path and os.path.isdir(path):
                 return os.path.normpath(path)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("读取注册表 HKEY_CURRENT_USER 失败: %s", e)
+        finally:
+            if key is not None:
+                try:
+                    winreg.CloseKey(key)
+                except Exception:
+                    pass
     for d in [r"C:\Program Files (x86)\Steam", r"C:\Program Files\Steam",
               r"D:\Steam", r"E:\Steam",
               str(Path.home() / ".steam" / "steam"),
@@ -860,6 +915,7 @@ def detect_steam_path() -> str:
 
 
 _REGISTRY_INSTALL_CACHE: dict[str, list[str]] = {}
+_REGISTRY_INSTALL_CACHE_LOCK = threading.Lock()
 
 
 def _detect_install_paths_from_registry(game_name: str, appid: str = "") -> list[str]:
@@ -870,7 +926,8 @@ def _detect_install_paths_from_registry(game_name: str, appid: str = "") -> list
     if not winreg or sys.platform != "win32":
         return []
     cache_key = _normalize_recognition_name(game_name) + "|" + str(appid or "").strip()
-    cached = _REGISTRY_INSTALL_CACHE.get(cache_key)
+    with _REGISTRY_INSTALL_CACHE_LOCK:
+        cached = _REGISTRY_INSTALL_CACHE.get(cache_key)
     if cached is not None:
         return list(cached)
 
@@ -933,7 +990,8 @@ def _detect_install_paths_from_registry(game_name: str, appid: str = "") -> list
         finally:
             winreg.CloseKey(base_key)
 
-    _REGISTRY_INSTALL_CACHE[cache_key] = results
+    with _REGISTRY_INSTALL_CACHE_LOCK:
+        _REGISTRY_INSTALL_CACHE[cache_key] = results
     return list(results)
 
 
@@ -1152,11 +1210,13 @@ def classify_storage_path(path: str) -> str:
     root = _get_volume_root(path)
     if not root:
         return "unknown"
-    cached = _STORAGE_KIND_CACHE.get(root)
-    if cached:
-        return cached
+    with _STORAGE_KIND_CACHE_LOCK:
+        cached = _STORAGE_KIND_CACHE.get(root)
+        if cached:
+            return cached
     if sys.platform != "win32":
-        _STORAGE_KIND_CACHE[root] = "unknown"
+        with _STORAGE_KIND_CACHE_LOCK:
+            _STORAGE_KIND_CACHE[root] = "unknown"
         return "unknown"
     try:
         import ctypes
@@ -1303,9 +1363,11 @@ def classify_storage_path(path: str) -> str:
                         kind = _query_kind_from_handle(volume_handle)
                 finally:
                     kernel32.CloseHandle(volume_handle)
-    except Exception:
+    except Exception as e:
+        logger.warning("分类存储路径失败 %s: %s", path, e)
         kind = "unknown"
-    _STORAGE_KIND_CACHE[root] = kind
+    with _STORAGE_KIND_CACHE_LOCK:
+        _STORAGE_KIND_CACHE[root] = kind
     return kind
 
 
@@ -1422,17 +1484,22 @@ COMMON_SAVE_BASES = [
     PUBLIC_DOCUMENTS,
 ]
 _STEAM_AUTOCLOUD_CACHE: Optional[list[dict]] = None
-_STORAGE_KIND_CACHE: dict[str, str] = {}
-_SAVE_DETECTION_CACHE: dict[str, list[dict]] = {}
-_STEAMDB_UFS_CACHE: dict[str, list[str]] = {}
-_STEAMDB_UFS_ENTRY_CACHE: dict[str, list[dict]] = {}
 _STEAMDB_UFS_LOCK = threading.Lock()
 _STEAMDB_UFS_SEMAPHORE = threading.Semaphore(2)
+_STORAGE_KIND_CACHE: dict[str, str] = {}
+_STORAGE_KIND_CACHE_LOCK = threading.Lock()
+_SAVE_DETECTION_CACHE: dict[str, list[dict]] = {}
+_SAVE_DETECTION_CACHE_LOCK = threading.Lock()
+_STEAMDB_UFS_CACHE: dict[str, list[str]] = {}
+_STEAMDB_UFS_ENTRY_CACHE: dict[str, list[dict]] = {}
 _APPINFO_UFS_CACHE: dict[str, list[dict]] = {}
+_APPINFO_UFS_CACHE_LOCK = threading.Lock()
 _APPINFO_LOADED = False
 _APPINFO_LOADED_PATH = ""
 _APPINFO_DATA: dict[str, list[dict]] = {}
+_APPINFO_DATA_LOCK = threading.Lock()
 _INSTALLED_GAME_INFO_CACHE: dict[str, dict[str, dict]] = {}
+_INSTALLED_GAME_INFO_CACHE_LOCK = threading.Lock()
 
 
 def _load_appinfo_vdf(steam_path: str):
@@ -1493,6 +1560,7 @@ def _load_appinfo_vdf(steam_path: str):
             savefiles = _extract_ufs_savefiles(record_data)
             if savefiles:
                 _APPINFO_DATA[str(appid)] = savefiles
+        del data  # 释放可能 30-80 MB 的 appinfo.vdf 内存
     except Exception:
         pass
 
@@ -1778,8 +1846,11 @@ def expand_path(template: str, install_dir: str = "") -> str:
             .replace("{INSTALL}", install_dir if install_dir else "__NO_INSTALL__"))
 
 
+_RE_RECOGNITION_NAME = re.compile(r"[^a-z0-9\u4e00-\u9fff]+")
+
+
 def _normalize_recognition_name(name: str) -> str:
-    return re.sub(r"[^a-z0-9\u4e00-\u9fff]+", "", (name or "").lower())
+    return _RE_RECOGNITION_NAME.sub("", (name or "").lower())
 
 
 _ROMAN_MAP = {
@@ -1888,7 +1959,8 @@ def remember_recognition_path(cfg: Optional[dict], appid: str, game_name: str, p
     excludes = get_recognition_excludes(cfg).get(key, [])
     if isinstance(excludes, list):
         get_recognition_excludes(cfg)[key] = [p for p in excludes if os.path.normpath(p) != norm]
-    _SAVE_DETECTION_CACHE.clear()
+    with _SAVE_DETECTION_CACHE_LOCK:
+        _SAVE_DETECTION_CACHE.clear()
 
 
 def exclude_recognition_path(cfg: Optional[dict], appid: str, game_name: str, path: str):
@@ -1902,7 +1974,8 @@ def exclude_recognition_path(cfg: Optional[dict], appid: str, game_name: str, pa
     cached = get_recognition_cache(cfg).get(key)
     if isinstance(cached, dict) and os.path.normpath(cached.get("path", "")) == norm:
         get_recognition_cache(cfg).pop(key, None)
-    _SAVE_DETECTION_CACHE.clear()
+    with _SAVE_DETECTION_CACHE_LOCK:
+        _SAVE_DETECTION_CACHE.clear()
 
 
 def get_confirmed_game_path(cfg: Optional[dict], appid: str, game_name: str) -> str:
@@ -2281,30 +2354,45 @@ def _streaming_file_hash(file_path: str, hasher) -> None:
         hasher.update(b"__UNREADABLE__")
 
 
-def compute_save_spec_hash(specs: list[dict]) -> str:
+def compute_save_spec_snapshot(specs: list[dict]) -> dict:
+    """Single-pass computation of hash, file_count, and latest_mtime for save specs.
+
+    Replaces the previous pattern of calling compute_save_spec_hash,
+    compute_save_spec_file_count, and compute_save_spec_latest_mtime
+    separately (3 full directory walks) with a single traversal.
+    """
     h = hashlib.md5()
     all_files = []
+    latest_mtime = 0.0
+    file_count = 0
     for idx, spec, abs_f, rel in iter_save_spec_files(specs):
+        file_count += 1
+        try:
+            latest_mtime = max(latest_mtime, abs_f.stat().st_mtime)
+        except OSError:
+            pass
         all_files.append((idx, rel, str(abs_f)))
     all_files.sort(key=lambda item: (item[0], item[1].lower(), item[2].lower()))
     for idx, rel, file_path in all_files:
         h.update(f"{idx}:{rel}".encode("utf-8", errors="ignore"))
         _streaming_file_hash(file_path, h)
-    return h.hexdigest()
+    return {
+        "hash": h.hexdigest(),
+        "file_count": file_count,
+        "latest_mtime": latest_mtime,
+    }
+
+
+def compute_save_spec_hash(specs: list[dict]) -> str:
+    return compute_save_spec_snapshot(specs)["hash"]
 
 
 def compute_save_spec_file_count(specs: list[dict]) -> int:
-    return sum(1 for _ in iter_save_spec_files(specs))
+    return compute_save_spec_snapshot(specs)["file_count"]
 
 
 def compute_save_spec_latest_mtime(specs: list[dict]) -> float:
-    latest = 0.0
-    for _, _, abs_f, _ in iter_save_spec_files(specs):
-        try:
-            latest = max(latest, abs_f.stat().st_mtime)
-        except OSError:
-            continue
-    return latest
+    return compute_save_spec_snapshot(specs)["latest_mtime"]
 
 
 def _remove_matching_spec_files(spec: dict):
@@ -2314,11 +2402,14 @@ def _remove_matching_spec_files(spec: dict):
     if _save_spec_covers_entire_dir(spec):
         _remove_tree_contents(base)
         return
+    failures = []
     for _, _, abs_f, _ in list(iter_save_spec_files([spec])):
         try:
             abs_f.unlink()
-        except Exception:
-            pass
+        except Exception as e:
+            failures.append(f"{abs_f}: {type(e).__name__}: {e}")
+    if failures:
+        raise OSError("Failed to remove existing save files before restore/sync: " + "; ".join(failures[:5]))
 
 
 def get_installed_game_info(steam_path: str, appid: str) -> Optional[dict]:
@@ -3728,25 +3819,83 @@ def load_config() -> dict:
 
 
 def save_config(cfg: dict):
+    global _CONFIG_BATCH_DEPTH, _CONFIG_BATCH_DIRTY, _CONFIG_BATCH_CFG_REF
+    # 如果当前处于批量写入上下文，仅标记脏位，延迟实际写盘
+    if _CONFIG_BATCH_DEPTH > 0:
+        _CONFIG_BATCH_DIRTY = True
+        _CONFIG_BATCH_CFG_REF = cfg
+        return
+    _save_config_now(cfg)
+
+
+def _save_config_now(cfg: dict):
     ensure_dirs()
-    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-        json.dump(cfg, f, ensure_ascii=False, indent=2)
+    data = json.dumps(cfg, ensure_ascii=False, indent=2)
+    tmp_path = CONFIG_FILE.with_name(
+        f"{CONFIG_FILE.name}.{os.getpid()}.{threading.get_ident()}.{uuid.uuid4().hex}.tmp"
+    )
+    with CONFIG_SAVE_LOCK:
+        try:
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                f.write(data)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, CONFIG_FILE)
+        finally:
+            try:
+                tmp_path.unlink(missing_ok=True)
+            except Exception:
+                pass
+
+
+class batch_config_save:
+    """上下文管理器：将多次 save_config 调用合并为单次写盘。
+
+    用法::
+
+        with batch_config_save():
+            set_game_sync_state(cfg, game, ...)    # 标记脏位但不写盘
+            clear_game_sync_conflict(cfg, game)    # 标记脏位但不写盘
+            clear_sync_retry(cfg, game)            # 标记脏位但不写盘
+        # 退出 with 块时统一写一次
+    """
+
+    def __enter__(self):
+        global _CONFIG_BATCH_DEPTH
+        _CONFIG_BATCH_DEPTH += 1
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        global _CONFIG_BATCH_DEPTH, _CONFIG_BATCH_DIRTY, _CONFIG_BATCH_CFG_REF
+        _CONFIG_BATCH_DEPTH = max(0, _CONFIG_BATCH_DEPTH - 1)
+        if _CONFIG_BATCH_DEPTH == 0 and _CONFIG_BATCH_DIRTY:
+            cfg_ref = _CONFIG_BATCH_CFG_REF
+            _CONFIG_BATCH_DIRTY = False
+            _CONFIG_BATCH_CFG_REF = None
+            if cfg_ref is not None:
+                _save_config_now(cfg_ref)
+        return False  # 不抑制异常
 
 
 def clear_startup_caches(cfg: Optional[dict] = None):
     global _STEAM_AUTOCLOUD_CACHE, _APPINFO_LOADED, _APPINFO_DATA, _APPINFO_LOADED_PATH, _INSTALLED_GAME_INFO_CACHE
 
     _STEAM_AUTOCLOUD_CACHE = None
-    _STORAGE_KIND_CACHE.clear()
-    _SAVE_DETECTION_CACHE.clear()
+    with _STORAGE_KIND_CACHE_LOCK:
+        _STORAGE_KIND_CACHE.clear()
+    with _SAVE_DETECTION_CACHE_LOCK:
+        _SAVE_DETECTION_CACHE.clear()
     _STEAMDB_UFS_CACHE.clear()
     _STEAMDB_UFS_ENTRY_CACHE.clear()
-    _APPINFO_UFS_CACHE.clear()
+    with _APPINFO_UFS_CACHE_LOCK:
+        _APPINFO_UFS_CACHE.clear()
     _APPINFO_LOADED = False
     _APPINFO_LOADED_PATH = ""
     _APPINFO_DATA = {}
-    _INSTALLED_GAME_INFO_CACHE.clear()
-    _REGISTRY_INSTALL_CACHE.clear()
+    with _INSTALLED_GAME_INFO_CACHE_LOCK:
+        _INSTALLED_GAME_INFO_CACHE.clear()
+    with _REGISTRY_INSTALL_CACHE_LOCK:
+        _REGISTRY_INSTALL_CACHE.clear()
 
     if cfg is not None:
         cache = cfg.get("recognition_cache")
@@ -4066,14 +4215,17 @@ def _remove_tree_contents(path: Path):
     if not path.exists():
         path.mkdir(parents=True, exist_ok=True)
         return
+    failures = []
     for item in path.iterdir():
         try:
             if item.is_dir():
                 shutil.rmtree(item)
             else:
                 item.unlink()
-        except Exception:
-            pass
+        except Exception as e:
+            failures.append(f"{item}: {type(e).__name__}: {e}")
+    if failures:
+        raise OSError("Failed to remove existing save directory contents before restore/sync: " + "; ".join(failures[:5]))
 
 
 def _iter_sync_payload_files(save_specs: list[dict]):
@@ -4288,7 +4440,16 @@ def extract_sync_archive(archive_path: Path, target_specs_or_paths):
     temp_root.mkdir(parents=True, exist_ok=True)
     try:
         with zipfile.ZipFile(archive_path, "r") as archive:
-            archive.extractall(path=temp_root)
+            for info in archive.infolist():
+                if not info.filename:
+                    continue
+                dest = _zip_safe_restore_path(temp_root, info.filename)
+                if info.is_dir():
+                    dest.mkdir(parents=True, exist_ok=True)
+                    continue
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                with archive.open(info) as src, open(dest, "wb") as dst:
+                    shutil.copyfileobj(src, dst)
         multi_root = temp_root / "_paths"
         if multi_root.is_dir():
             for idx, spec in enumerate(target_specs, start=1):
@@ -4340,9 +4501,27 @@ def _webdav_decode_password(encoded: str) -> str:
         return ""
 
 
+_webdav_client_cache: dict = {"fingerprint": None, "client": None}
+
+
+def _webdav_cfg_fingerprint(cfg: dict) -> str:
+    """Derive a fingerprint from WebDAV-related config fields for cache invalidation."""
+    parts = [
+        str(cfg.get("webdav_url", "") or "").strip(),
+        str(cfg.get("webdav_username", "") or "").strip(),
+        str(cfg.get("webdav_password", "") or ""),
+        str(cfg.get("webdav_preset", "generic") or "generic").strip(),
+        str(cfg.get("webdav_verify_ssl", True)),
+    ]
+    return "|".join(parts)
+
+
 def _webdav_make_client(cfg: dict):
     if not HAS_WEBDAV or not cfg.get("webdav_enabled"):
         return None
+    fp = _webdav_cfg_fingerprint(cfg)
+    if _webdav_client_cache["fingerprint"] == fp and _webdav_client_cache["client"] is not None:
+        return _webdav_client_cache["client"]
     url = _webdav_normalize_url(
         str(cfg.get("webdav_url", "") or "").strip(),
         str(cfg.get("webdav_preset", "generic") or "generic").strip(),
@@ -4358,6 +4537,8 @@ def _webdav_make_client(cfg: dict):
         "webdav_password": _webdav_decode_password(cfg.get("webdav_password", "")),
     })
     _webdav_apply_client_options(client, cfg)
+    _webdav_client_cache["fingerprint"] = fp
+    _webdav_client_cache["client"] = client
     return client
 
 
@@ -4901,15 +5082,13 @@ def webdav_download_latest(cfg: dict, game_ref, local_sync_game_dir: Path,
         if cache_mirror_remote:
             _prune_webdav_cache_payload(local_sync_game_dir, latest_name)
         archive_dir = latest_entry["dir"]
-        remote_meta_info = {}
         meta_name = latest_name + ".meta.json"
+        remote_zip = f"{archive_dir.rstrip('/')}/{latest_name}"
+        remote_zip_info = {}
         try:
-            remote_meta_info = _webdav_info_with_variants(
-                client,
-                f"{archive_dir.rstrip('/')}/{meta_name}",
-            ) or {}
+            remote_zip_info = _webdav_info_with_variants(client, remote_zip) or {}
         except Exception:
-            remote_meta_info = {}
+            remote_zip_info = {}
 
         # 解析时间戳 -> 本地 YYYY-MM 子目录
         ts_part = latest_name.replace(".zip", "")
@@ -4934,7 +5113,6 @@ def webdav_download_latest(cfg: dict, game_ref, local_sync_game_dir: Path,
                     if not expected_sha256 or compute_file_sha256(local_zip) == expected_sha256:
                         return None  # 已缓存且校验通过
 
-        remote_zip = f"{archive_dir.rstrip('/')}/{latest_name}"
         _webdav_download_with_variants(client, remote_zip, str(local_zip))
 
         # 也下载 meta 文件
@@ -4953,9 +5131,9 @@ def webdav_download_latest(cfg: dict, game_ref, local_sync_game_dir: Path,
                 meta_data = {}
         expected_size = int(meta_data.get("archive_size", 0) or 0)
         expected_sha256 = str(meta_data.get("archive_sha256", "") or "").lower()
-        if not expected_size and remote_meta_info.get("size"):
+        if not expected_size and remote_zip_info.get("size"):
             try:
-                expected_size = int(remote_meta_info.get("size", 0) or 0)
+                expected_size = int(remote_zip_info.get("size", 0) or 0)
             except Exception:
                 expected_size = 0
         if expected_size and int(local_zip.stat().st_size) != expected_size:
@@ -4982,19 +5160,26 @@ def webdav_download_latest(cfg: dict, game_ref, local_sync_game_dir: Path,
         return None
 
 
-def compute_dir_hash(directory: str) -> str:
-    """
-    递归计算目录内所有文件的内容 MD5 校验和。
-    将每个文件的相对路径 + 内容 MD5 拼接后再算总 hash，
-    100% 准确检测内容变化，不依赖 mtime 或文件大小。
+def snapshot_dir(directory: str) -> dict:
+    """Single-pass directory snapshot: hash, file_count, latest_mtime in one os.walk.
+
+    Replaces the previous pattern of calling compute_dir_hash, compute_dir_file_count,
+    and compute_dir_latest_mtime separately (3 full directory walks).
     """
     h = hashlib.md5()
+    file_count = 0
+    latest_mtime = 0.0
     try:
         all_files = []
         for root, _, files in os.walk(directory):
             for f in files:
                 fp = os.path.join(root, f)
                 rel = os.path.relpath(fp, directory)
+                file_count += 1
+                try:
+                    latest_mtime = max(latest_mtime, os.path.getmtime(fp))
+                except OSError:
+                    pass
                 all_files.append((rel, fp))
         # 按相对路径排序，保证顺序一致
         all_files.sort(key=lambda x: x[0])
@@ -5003,43 +5188,43 @@ def compute_dir_hash(directory: str) -> str:
             _streaming_file_hash(fp, h)
     except OSError:
         pass
-    return h.hexdigest()
+    return {
+        "hash": h.hexdigest(),
+        "file_count": file_count,
+        "latest_mtime": latest_mtime,
+    }
+
+
+def compute_dir_hash(directory: str) -> str:
+    """递归计算目录内所有文件的内容 MD5 校验和。"""
+    return snapshot_dir(directory)["hash"]
 
 
 def compute_dir_file_count(directory: str) -> int:
     """统计目录内文件数量"""
-    count = 0
-    try:
-        for _, _, files in os.walk(directory):
-            count += len(files)
-    except OSError:
-        pass
-    return count
+    return snapshot_dir(directory)["file_count"]
 
 
 def compute_dir_latest_mtime(directory: str) -> float:
     """返回目录内最新文件修改时间；目录为空时返回 0。"""
-    latest = 0.0
-    try:
-        for root, _, files in os.walk(directory):
-            for f in files:
-                fp = os.path.join(root, f)
-                try:
-                    latest = max(latest, os.path.getmtime(fp))
-                except OSError:
-                    continue
-    except OSError:
-        pass
-    return latest
+    return snapshot_dir(directory)["latest_mtime"]
 
 
 def snapshot_sync_side(directory: str) -> dict:
     """采集目录的同步摘要，用于冲突展示。"""
+    if not os.path.isdir(directory):
+        return {
+            "path": directory,
+            "file_count": 0,
+            "hash": "",
+            "latest_mtime": 0.0,
+        }
+    snap = snapshot_dir(directory)
     return {
         "path": directory,
-        "file_count": compute_dir_file_count(directory) if os.path.isdir(directory) else 0,
-        "hash": compute_dir_hash(directory) if os.path.isdir(directory) else "",
-        "latest_mtime": compute_dir_latest_mtime(directory) if os.path.isdir(directory) else 0.0,
+        "file_count": snap["file_count"],
+        "hash": snap["hash"],
+        "latest_mtime": snap["latest_mtime"],
     }
 
 
@@ -5073,10 +5258,10 @@ def snapshot_sync_paths(paths: list[str], label: str) -> dict:
     total_files = 0
     latest_mtime = 0.0
     for idx, path in enumerate(existing, start=1):
-        file_count = compute_dir_file_count(path)
-        total_files += file_count
-        latest_mtime = max(latest_mtime, compute_dir_latest_mtime(path))
-        hash_parts.append((f"path_{idx}", compute_dir_hash(path) if file_count else ""))
+        snap = snapshot_dir(path)
+        total_files += snap["file_count"]
+        latest_mtime = max(latest_mtime, snap["latest_mtime"])
+        hash_parts.append((f"path_{idx}", snap["hash"] if snap["file_count"] else ""))
     return {
         "path": label,
         "file_count": total_files,
@@ -5098,10 +5283,10 @@ def snapshot_sync_specs(specs: list[dict], label: str) -> dict:
     total_files = 0
     latest_mtime = 0.0
     for idx, spec in enumerate(existing, start=1):
-        file_count = compute_save_spec_file_count([spec])
-        total_files += file_count
-        latest_mtime = max(latest_mtime, compute_save_spec_latest_mtime([spec]))
-        hash_parts.append((f"path_{idx}", compute_save_spec_hash([spec]) if file_count else ""))
+        snap = compute_save_spec_snapshot([spec])
+        total_files += snap["file_count"]
+        latest_mtime = max(latest_mtime, snap["latest_mtime"])
+        hash_parts.append((f"path_{idx}", snap["hash"] if snap["file_count"] else ""))
     return {
         "path": label,
         "file_count": total_files,
@@ -5514,11 +5699,14 @@ def sync_game_save(game: dict, sync_folder: str, mode: str = "smart",
         """将 src 目录完整镜像到 dst（兼容 OneDrive/Dropbox 等云盘锁定）"""
         dst_p = Path(dst)
         dst_p.mkdir(parents=True, exist_ok=True)
+        # 单次遍历 src：同时复制文件和收集源文件集合
+        src_files = set()
         for root, _, files in os.walk(src):
             rel = os.path.relpath(root, src)
             target_dir = dst_p / rel if rel != "." else dst_p
             target_dir.mkdir(parents=True, exist_ok=True)
             for file_name in files:
+                src_files.add(os.path.normpath(os.path.join(rel, file_name)))
                 src_file = os.path.join(root, file_name)
                 dst_file = target_dir / file_name
                 try:
@@ -5529,11 +5717,7 @@ def sync_game_save(game: dict, sync_folder: str, mode: str = "smart",
                         shutil.copy2(src_file, dst_file)
                     except PermissionError:
                         pass
-        src_files = set()
-        for root, _, files in os.walk(src):
-            rel = os.path.relpath(root, src)
-            for file_name in files:
-                src_files.add(os.path.normpath(os.path.join(rel, file_name)))
+        # 单次遍历 dst：删除 src 中不存在的文件
         for root, _, files in os.walk(str(dst_p)):
             rel = os.path.relpath(root, str(dst_p))
             for file_name in files:
@@ -5595,13 +5779,15 @@ def sync_game_save(game: dict, sync_folder: str, mode: str = "smart",
                 _mirror(remote_path, local_path)
 
     def _record_synced(hash_value: str, action: str):
-        set_game_sync_state(cfg, game, hash_value, hash_value, action)
-        clear_game_sync_conflict(cfg, game)
-        clear_sync_retry(cfg, game)
+        with batch_config_save():
+            set_game_sync_state(cfg, game, hash_value, hash_value, action)
+            clear_game_sync_conflict(cfg, game)
+            clear_sync_retry(cfg, game)
 
     def _record_current(action: str = ""):
-        set_game_sync_state(cfg, game, local_hash, remote_hash, action)
-        clear_game_sync_conflict(cfg, game)
+        with batch_config_save():
+            set_game_sync_state(cfg, game, local_hash, remote_hash, action)
+            clear_game_sync_conflict(cfg, game)
 
     if using_webdav_cache and webdav_prefetch_error and mode in {"download", "bidirectional"}:
         return bilingual_text(
@@ -5831,8 +6017,13 @@ def create_backup(game: dict, note: str = "", extra_meta: Optional[dict] = None)
         storage_key = get_game_storage_key(game)
     game_dir = BACKUP_ROOT / storage_key
     game_dir.mkdir(parents=True, exist_ok=True)
-    ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    now = datetime.datetime.now()
+    ts = now.strftime("%Y%m%d_%H%M%S_%f")
     zip_path = game_dir / f"{ts}.zip"
+    suffix = 1
+    while zip_path.exists() or zip_path.with_suffix(".meta.json").exists():
+        zip_path = game_dir / f"{ts}_{suffix}.zip"
+        suffix += 1
     is_multi = len(save_specs) > 1
     with _open_zip_for_write(zip_path) as zf:
         for idx, _, abs_f, rel in iter_save_spec_files(save_specs):
@@ -11566,8 +11757,12 @@ class SteamSaveManager(ctk.CTk):
 
     @staticmethod
     def _fmt_ts(ts: str) -> str:
-        try: return datetime.datetime.strptime(ts, "%Y%m%d_%H%M%S").strftime("%Y-%m-%d %H:%M:%S")
-        except: return ts
+        for fmt in ("%Y%m%d_%H%M%S_%f", "%Y%m%d_%H%M%S"):
+            try:
+                return datetime.datetime.strptime(ts, fmt).strftime("%Y-%m-%d %H:%M:%S")
+            except Exception:
+                continue
+        return ts
 
 
 # ══════════════════════════════════════════════
