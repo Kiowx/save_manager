@@ -1,6 +1,6 @@
 {
-  "notes": "1. 修复同步 ZIP 解压使用 extractall() 的安全问题，改为逐项校验路径后写入，避免异常归档路径逃逸目标目录\n2. 修复 WebDAV 下载校验误用 .meta.json 文件大小的问题，现在会使用远端 ZIP 文件大小作为 fallback 校验依据\n3. 修复同一秒内连续创建备份时文件名冲突导致旧备份被覆盖的问题，备份文件名现包含微秒并带兜底序号\n4. 优化配置保存逻辑，改为线程锁保护、临时文件写入和原子替换，降低并发写入或异常退出导致 config.json 损坏的风险\n5. 修复恢复/同步前清理旧存档失败时静默继续的问题，现在会抛出错误并阻止继续写入，避免新旧存档混合\n6. 备份时间显示已兼容新的微秒时间戳格式，同时保留对旧格式的支持\n7. 同步快照由 3 次目录遍历合并为单次遍历，检测提速 60-70%\n8. 新增 batch_config_save，同步时多次配置写入合并为 1 次 fsync\n9. _mirror() 目录遍历从 3 次减至 2 次\n10. appinfo.vdf 解析后立即释放内存（30-80 MB）\n11. 预编译 _normalize_recognition_name 正则表达式\n12. 修复 _REGISTRY_INSTALL_CACHE / _SAVE_DETECTION_CACHE 线程安全问题\n13. WebDAV 客户端实例缓存，避免重复 TLS 握手",
-  "sha256": "7fe5585e5f46693652839ac69b5d6c614430ca843d12031072c2e8093e042ab8",
-  "version": "1.3.9",
-  "url": "https://github.com/Kiowx/save_manager/releases/download/v1.3.9/SteamSaveManager.exe"
+  "sha256": "74257f05acc714a257cdc3f760010ac3b7f61e3a7e59e0397c9ab1bb73f94511",
+  "url": "https://github.com/Kiowx/save_manager/releases/download/v1.4.0/SteamSaveManager.exe",
+  "version": "1.4.0",
+  "notes": "1. 修复进程监控误识别问题：Steam 游戏不再使用宽松的进程名关键词兜底，避免未打开游戏时被短关键词误判为正在运行。\n2. 优化《Cat Quest II / 猫咪斗恶龙II》这类游戏的识别逻辑，避免 `cat` 等短词命中无关进程导致误判。\n3. 进程名关键词匹配改为更保守的 token 匹配，仅用于无 AppID 的手动游戏。\n4. 保留用户手动指定进程名的精确匹配能力，不影响非 Steam 游戏的手动监控。\n5. 移除自定义进程匹配中对每个进程 `cmdline()` 的读取，降低周期性进程扫描开销，减少游戏中卡顿概率。\n6. 为模糊进程扫描增加缓存，减少重复扫描带来的性能影响。\n7. 修复 WebDAV 预取失败被静默当作“远端无更新”的问题；远端列表、下载、ZIP 校验和 SHA256 校验失败现在会传递给同步流程。\n8. 修复 legacy 同步镜像失败被忽略的问题；复制/删除失败现在会中止操作，不再记录为同步成功。\n9. 新增下载后 hash 校验，只有本地下载结果与远端快照一致时才会记录同步成功基线，避免不完整存档被标记为已同步。\n10. 将批量配置保存改为线程本地状态，避免 UI、自动同步和进程监控线程之间互相干扰延迟写盘状态。"
 }
