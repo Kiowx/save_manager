@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Steam 游戏存档备份管理器 v1.3.9 — 通用版"""
+"""Steam 游戏存档备份管理器 v1.4.0 — 通用版"""
 
 import os
 import sys
@@ -101,7 +101,7 @@ except ImportError as exc:
 # ══════════════════════════════════════════════
 
 APP_NAME = "Steam Save Manager"
-VERSION = "1.3.9"
+VERSION = "1.4.0"
 APP_DIR = Path(os.path.dirname(os.path.abspath(sys.argv[0])))
 LEGACY_CONFIG_DIR = Path.home() / ".steam_save_manager"
 STARTUP_AUTOSTART_FLAG = "--startup-launch"
@@ -6319,10 +6319,11 @@ class GameProcessMonitor:
     - 检测到游戏启动 → 自动下载云端存档
     - 检测到游戏关闭 → 自动上传本地存档
 
-    检测策略（三层，优先级从高到低）：
-    1. Steam 注册表 RunningAppID（最可靠，零开销）
+    检测策略（优先级从高到低）：
+    1. Steam 注册表 RunningAppID / Apps Running 值（最可靠，零开销）
     2. gameoverlayui.exe 命令行参数中的 AppID（支持多游戏并行）
-    3. 进程名关键词模糊匹配（兜底，覆盖非 Steam 启动的场景）
+    3. 用户手动指定的进程名（精确匹配）
+    4. 无 AppID 游戏的保守进程名关键词匹配（兜底）
     """
 
     def __init__(self, cfg: dict, poll_interval: int = 10, *, on_backups_changed=None):
@@ -6334,6 +6335,7 @@ class GameProcessMonitor:
         self.sync_log: list[str] = []  # 同步活动日志（最近50条）
         self._upload_guards: dict[str, dict] = {}
         self._on_backups_changed_cb = on_backups_changed
+        self._fuzzy_scan_cache: tuple[float, set[str]] = (0.0, set())
 
     def start(self):
         _join_thread(self._thread, timeout=0.2)
@@ -6470,14 +6472,6 @@ class GameProcessMonitor:
                 candidates.update(_monitor_process_variants(clean))
         except Exception:
             pass
-        try:
-            cmdline = proc.cmdline()
-            if cmdline:
-                first = _normalize_monitor_process_name(cmdline[0])
-                if first:
-                    candidates.update(_monitor_process_variants(first))
-        except Exception:
-            pass
         return candidates
 
     # ── 策略 1: Steam 注册表 RunningAppID ──
@@ -6595,21 +6589,51 @@ class GameProcessMonitor:
         return [w for w in raw
                 if (len(w) >= 3 or w.isdigit()) and w not in GENERIC_WORDS]
 
+    @staticmethod
+    def _process_name_tokens(process_name: str) -> set[str]:
+        proc_base = os.path.splitext(str(process_name or "").lower())[0]
+        return set(re.findall(r'[a-zA-Z0-9\u4e00-\u9fff]+', proc_base))
+
+    @classmethod
+    def _process_name_matches_keywords(cls, keywords: list[str], process_name: str) -> bool:
+        if not keywords:
+            return False
+        proc_base = os.path.splitext(str(process_name or "").lower())[0]
+        tokens = cls._process_name_tokens(proc_base)
+        hits = sum(1 for kw in keywords if kw in tokens)
+        if len(keywords) >= 2:
+            return hits >= 2
+        keyword = keywords[0]
+        if re.search(r"[\u4e00-\u9fff]", keyword):
+            return keyword == proc_base or keyword in tokens
+        return len(keyword) >= 5 and (keyword == proc_base or keyword in tokens)
+
     def _get_runtime_keys_from_process_names(self, tracked_games: list[tuple[str, dict]]) -> set[str]:
         """
-        通过进程名关键词匹配检测正在运行的游戏。
-        作为兜底方案，覆盖非 Steam 启动或 overlay 未启动的场景。
+        通过进程名关键词匹配检测正在运行的无 AppID 游戏。
+        Steam 游戏只走 AppID / overlay / 手动进程名，避免短关键词误判。
         """
         matched: set[str] = set()
         if not HAS_PSUTIL:
             return matched
-        # 构建关键词映射
+        now = time.monotonic()
+        cache_at, cache_result = self._fuzzy_scan_cache
+        if now - cache_at < 30.0:
+            return set(cache_result)
+
+        # 构建关键词映射。只给无 AppID 且未手动指定进程名的游戏兜底，
+        # 避免 Steam 游戏被短关键词（如 Cat Quest II -> cat）误识别。
         game_kw_map = []
         for runtime_key, g in tracked_games:
+            if str(g.get("appid", "") or "").strip():
+                continue
+            if get_game_monitor_processes(g):
+                continue
             kws = self._extract_keywords(g["name"])
             if kws:
                 game_kw_map.append((kws, runtime_key))
         if not game_kw_map:
+            self._fuzzy_scan_cache = (now, set())
             return matched
 
         for proc in psutil.process_iter(["pid", "name"]):
@@ -6619,15 +6643,14 @@ class GameProcessMonitor:
                     continue
                 if any(name.startswith(p) for p in self.SKIP_PREFIXES):
                     continue
-                proc_base = name.replace(".exe", "")
                 for kws, runtime_key in game_kw_map:
-                    hits = sum(1 for kw in kws if kw in proc_base)
-                    if hits >= 2 or (hits > 0 and hits / len(kws) >= 0.5):
+                    if self._process_name_matches_keywords(kws, name):
                         matched.add(runtime_key)
                         break
             except (psutil.NoSuchProcess, psutil.AccessDenied,
                     psutil.ZombieProcess):
                 continue
+        self._fuzzy_scan_cache = (now, set(matched))
         return matched
 
     def _get_runtime_keys_from_custom_processes(self, tracked_games: list[tuple[str, dict]]) -> set[str]:
