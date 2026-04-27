@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Steam 游戏存档备份管理器 v1.4.0 — 通用版"""
+"""Steam 游戏存档备份管理器 v1.4.1 — 通用版"""
 
 import os
 import sys
@@ -101,7 +101,7 @@ except ImportError as exc:
 # ══════════════════════════════════════════════
 
 APP_NAME = "Steam Save Manager"
-VERSION = "1.4.0"
+VERSION = "1.4.1"
 APP_DIR = Path(os.path.dirname(os.path.abspath(sys.argv[0])))
 LEGACY_CONFIG_DIR = Path.home() / ".steam_save_manager"
 STARTUP_AUTOSTART_FLAG = "--startup-launch"
@@ -160,6 +160,7 @@ BACKUP_ROOT = APP_DIR / "backups"
 LOCK_FILE = CONFIG_DIR / ".lock"
 UPDATE_MANIFEST_URL = "https://raw.githubusercontent.com/Kiowx/save_manager/refs/heads/main/update/update.json"
 CONFIG_SAVE_LOCK = threading.Lock()
+SAVE_IO_LOCK = threading.RLock()
 _CONFIG_BATCH_DEPTH = 0
 _CONFIG_BATCH_DIRTY = False
 _CONFIG_BATCH_CFG_REF: Optional[dict] = None
@@ -569,6 +570,16 @@ def download_update_package(manifest: dict, dest_dir: Path, timeout: int = 30) -
         except OSError:
             pass
     temp_target.replace(target)
+    if sys.platform == "win32" and target.suffix.lower() == ".exe":
+        try:
+            with open(target, "rb") as fh:
+                if fh.read(2) != b"MZ":
+                    target.unlink(missing_ok=True)
+                    raise ValueError("Downloaded update is not a valid Windows executable")
+        except ValueError:
+            raise
+        except Exception:
+            pass
     return target
 
 
@@ -581,23 +592,45 @@ def get_update_download_dir() -> Path:
     return fallback
 
 
-def _build_windows_replace_and_launch_command(downloaded_path: Path, current_path: Path, *, backup_old: bool = True) -> str:
+def _current_executable_path() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve()
+    return Path(os.path.abspath(sys.argv[0])).resolve()
+
+
+def _ps_quote(value: Path | str) -> str:
+    return str(value).replace("'", "''")
+
+
+def _build_windows_replace_and_launch_command(downloaded_path: Path, current_path: Path, *,
+                                              current_pid: int = 0,
+                                              backup_old: bool = True) -> str:
     src = str(downloaded_path).replace("'", "''")
     dst = str(current_path).replace("'", "''")
     bak = str(current_path.with_suffix(current_path.suffix + ".old")).replace("'", "''")
+    log = _ps_quote(Path(downloaded_path).with_suffix(Path(downloaded_path).suffix + ".update-error.log"))
     backup_block = (
+        "if (Test-Path -LiteralPath $dst) { "
         "if (Test-Path -LiteralPath $bak) { Remove-Item -LiteralPath $bak -Force } "
-        "if (Test-Path -LiteralPath $dst) { Move-Item -LiteralPath $dst -Destination $bak -Force } "
+        "Move-Item -LiteralPath $dst -Destination $bak -Force } "
         if backup_old else
         "if (Test-Path -LiteralPath $dst) { Remove-Item -LiteralPath $dst -Force } "
     )
     return (
-        "$ErrorActionPreference='SilentlyContinue'; "
-        f"$src='{src}'; $dst='{dst}'; $bak='{bak}'; "
-        "Start-Sleep -Seconds 1; "
+        "$ErrorActionPreference='Stop'; "
+        f"$src='{src}'; $dst='{dst}'; $bak='{bak}'; $log='{log}'; $pidToWait={int(current_pid or 0)}; "
+        "$deadline=(Get-Date).AddSeconds(60); "
+        "if ($pidToWait -gt 0) { try { Wait-Process -Id $pidToWait -Timeout 45 -ErrorAction SilentlyContinue } catch {} } "
+        "$lastError=''; "
+        "while ((Get-Date) -lt $deadline) { "
+        "try { "
         f"{backup_block}"
         "Move-Item -LiteralPath $src -Destination $dst -Force; "
-        "Start-Process -FilePath $dst"
+        "Start-Process -FilePath $dst; exit 0 "
+        "} catch { $lastError=$_.Exception.Message; Start-Sleep -Milliseconds 700 } "
+        "} "
+        "try { ('Update replacement failed: ' + $lastError) | Out-File -LiteralPath $log -Encoding UTF8 } catch {} "
+        "if (Test-Path -LiteralPath $src) { Start-Process -FilePath $src }"
     )
 
 # 系统环境路径
@@ -1443,6 +1476,12 @@ WEAK_SAVE_FILE_EXTENSIONS = SAVE_FILE_EXTENSIONS - STRONG_SAVE_FILE_EXTENSIONS
 NEGATIVE_FILE_HINTS = {
     "log", "logs", "cache", "shader", "screenshot", "crash", "dump",
     "telemetry", "analytics", "temp", "tmp"
+}
+SAVE_PAYLOAD_IGNORED_SUFFIXES = {
+    ".log", ".tmp", ".temp",
+}
+SAVE_PAYLOAD_IGNORED_NAMES = {
+    ".ds_store", "desktop.ini", "thumbs.db",
 }
 ENGINE_SAVE_DIR_SEQUENCES = [
     ("saved", "savegames"),
@@ -2309,6 +2348,14 @@ def _save_spec_match_relpath(spec: dict, rel_path: str) -> bool:
     return False
 
 
+def _is_ignored_save_payload_file(path_or_name: str | Path) -> bool:
+    rel = str(path_or_name or "").replace("\\", "/")
+    name = PurePosixPath(rel).name.lower()
+    if not name:
+        return False
+    return name in SAVE_PAYLOAD_IGNORED_NAMES or Path(name).suffix.lower() in SAVE_PAYLOAD_IGNORED_SUFFIXES
+
+
 def _save_specs_match_path(specs: list[dict], abs_path: str) -> bool:
     target = Path(abs_path)
     for spec in _normalize_unique_save_specs(specs):
@@ -2318,6 +2365,8 @@ def _save_specs_match_path(specs: list[dict], abs_path: str) -> bool:
                 continue
             rel = target.relative_to(base).as_posix()
         except Exception:
+            continue
+        if _is_ignored_save_payload_file(rel):
             continue
         if _save_spec_match_relpath(spec, rel):
             return True
@@ -2337,6 +2386,8 @@ def iter_save_spec_files(specs: list[dict]):
             for file_name in files:
                 abs_f = Path(root) / file_name
                 rel = abs_f.relative_to(base).as_posix()
+                if _is_ignored_save_payload_file(rel):
+                    continue
                 if _save_spec_match_relpath(spec, rel):
                     yield idx, spec, abs_f, rel
 
@@ -2400,7 +2451,7 @@ def _remove_matching_spec_files(spec: dict):
     if not base.is_dir():
         return
     if _save_spec_covers_entire_dir(spec):
-        _remove_tree_contents(base)
+        _remove_tree_contents(base, preserve_ignored_payload_files=True)
         return
     failures = []
     for _, _, abs_f, _ in list(iter_save_spec_files([spec])):
@@ -4211,11 +4262,35 @@ def enforce_all_sync_archive_limits(cfg: Optional[dict]):
                 pass
 
 
-def _remove_tree_contents(path: Path):
+def _remove_tree_contents(path: Path, preserve_ignored_payload_files: bool = False):
     if not path.exists():
         path.mkdir(parents=True, exist_ok=True)
         return
     failures = []
+    if preserve_ignored_payload_files:
+        for root, dirs, files in os.walk(path, topdown=False):
+            root_path = Path(root)
+            rel_root = os.path.relpath(root, path)
+            for file_name in files:
+                file_path = root_path / file_name
+                rel = file_name if rel_root == "." else str(PurePosixPath(rel_root.replace("\\", "/")) / file_name)
+                if _is_ignored_save_payload_file(rel):
+                    continue
+                try:
+                    file_path.unlink()
+                except Exception as e:
+                    failures.append(f"{file_path}: {type(e).__name__}: {e}")
+            for dir_name in dirs:
+                dir_path = root_path / dir_name
+                try:
+                    dir_path.rmdir()
+                except OSError:
+                    pass
+                except Exception as e:
+                    failures.append(f"{dir_path}: {type(e).__name__}: {e}")
+        if failures:
+            raise OSError("Failed to remove existing save directory contents before restore/sync: " + "; ".join(failures[:5]))
+        return
     for item in path.iterdir():
         try:
             if item.is_dir():
@@ -4243,9 +4318,22 @@ def create_sync_archive(game: dict, sync_game_dir: Path,
     month_dir = get_sync_archive_root(sync_game_dir) / now.strftime("%Y-%m")
     month_dir.mkdir(parents=True, exist_ok=True)
     archive_path = month_dir / f"{now.strftime('%Y%m%d_%H%M%S_%f')}.zip"
-    with _open_zip_for_write(archive_path) as archive:
-        for _, abs_f, arcname in _iter_sync_payload_files(save_specs):
-            _zip_write_file(archive, abs_f, arcname)
+    temp_archive_path = _atomic_zip_path(archive_path)
+    file_count = 0
+    try:
+        with _open_zip_for_write(temp_archive_path) as archive:
+            for _, abs_f, arcname in _iter_sync_payload_files(save_specs):
+                _zip_write_file(archive, abs_f, arcname)
+                file_count += 1
+        if file_count <= 0:
+            raise FileNotFoundError("No readable save files were found for sync archive")
+        temp_archive_path.replace(archive_path)
+    except Exception:
+        try:
+            temp_archive_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+        raise
     archive_size = int(archive_path.stat().st_size) if archive_path.exists() else 0
     archive_sha256 = compute_file_sha256(archive_path) if archive_size else ""
     meta = {
@@ -4439,9 +4527,12 @@ def extract_sync_archive(archive_path: Path, target_specs_or_paths):
     temp_root = temp_parent / f"steam_sync_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
     temp_root.mkdir(parents=True, exist_ok=True)
     try:
+        extracted_count = 0
         with zipfile.ZipFile(archive_path, "r") as archive:
             for info in archive.infolist():
                 if not info.filename:
+                    continue
+                if not info.is_dir() and _is_ignored_save_payload_file(info.filename):
                     continue
                 dest = _zip_safe_restore_path(temp_root, info.filename)
                 if info.is_dir():
@@ -4450,15 +4541,20 @@ def extract_sync_archive(archive_path: Path, target_specs_or_paths):
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 with archive.open(info) as src, open(dest, "wb") as dst:
                     shutil.copyfileobj(src, dst)
+                extracted_count += 1
+        if extracted_count <= 0:
+            return
         multi_root = temp_root / "_paths"
         if multi_root.is_dir():
             for idx, spec in enumerate(target_specs, start=1):
                 source_dir = multi_root / f"p{idx}"
                 target_dir = Path(spec["base"])
                 target_dir.mkdir(parents=True, exist_ok=True)
-                _remove_matching_spec_files(spec)
                 if not source_dir.exists():
                     continue
+                if not any(source_dir.iterdir()):
+                    continue
+                _remove_matching_spec_files(spec)
                 for item in source_dir.iterdir():
                     dest = target_dir / item.name
                     if item.is_dir():
@@ -4784,17 +4880,22 @@ def _webdav_remote_archive_dir(cfg: Optional[dict], game_ref) -> str:
     return _webdav_remote_archive_dirs(cfg, game_ref)[0]
 
 
-def _webdav_list_archive_entries(client, cfg: dict, game_ref) -> list[dict]:
+def _webdav_list_archive_entries(client, cfg: dict, game_ref, strict: bool = False) -> list[dict]:
     entries = []
     seen = set()
+    errors = []
     for remote_dir in _webdav_remote_archive_dirs(cfg, game_ref):
         try:
             existing_dir = _webdav_find_existing_variant(client, remote_dir)
-        except Exception:
+        except FileNotFoundError:
+            continue
+        except Exception as e:
+            errors.append(f"{remote_dir}: {type(e).__name__}: {e}")
             continue
         try:
             items = client.list(existing_dir)
-        except Exception:
+        except Exception as e:
+            errors.append(f"{existing_dir}: {type(e).__name__}: {e}")
             continue
         for item in items:
             name = item.strip("/").rsplit("/", 1)[-1] if "/" in item else item.strip("/")
@@ -4806,6 +4907,8 @@ def _webdav_list_archive_entries(client, cfg: dict, game_ref) -> list[dict]:
             seen.add(entry_key)
             entries.append({"dir": existing_dir, "name": name})
     entries.sort(key=lambda item: item["name"])
+    if strict and not entries and errors:
+        raise RuntimeError("Failed to list WebDAV archives: " + "; ".join(errors[:3]))
     return entries
 
 
@@ -5070,94 +5173,109 @@ def webdav_download_latest(cfg: dict, game_ref, local_sync_game_dir: Path,
     """从 WebDAV 下载最新存档到本地缓存，返回本地 ZIP 路径或 None"""
     client = _webdav_make_client(cfg)
     if not client:
-        return None
-    try:
-        archive_entries = _webdav_list_archive_entries(client, cfg, game_ref)
-        if not archive_entries:
-            if cache_mirror_remote:
-                _prune_webdav_cache_payload(local_sync_game_dir, None)
-            return None
-        latest_entry = archive_entries[-1]
-        latest_name = latest_entry["name"]
+        raise RuntimeError("WebDAV client is unavailable")
+    archive_entries = _webdav_list_archive_entries(client, cfg, game_ref, strict=True)
+    if not archive_entries:
         if cache_mirror_remote:
-            _prune_webdav_cache_payload(local_sync_game_dir, latest_name)
-        archive_dir = latest_entry["dir"]
-        meta_name = latest_name + ".meta.json"
-        remote_zip = f"{archive_dir.rstrip('/')}/{latest_name}"
+            _prune_webdav_cache_payload(local_sync_game_dir, None)
+        return None
+    latest_entry = archive_entries[-1]
+    latest_name = latest_entry["name"]
+    archive_dir = latest_entry["dir"]
+    meta_name = latest_name + ".meta.json"
+    remote_zip = f"{archive_dir.rstrip('/')}/{latest_name}"
+    remote_zip_info = {}
+    try:
+        remote_zip_info = _webdav_info_with_variants(client, remote_zip) or {}
+    except Exception:
         remote_zip_info = {}
+
+    # 解析时间戳 -> 本地 YYYY-MM 子目录
+    ts_part = latest_name.replace(".zip", "")
+    month_str = ts_part[:7].replace("_", "-", 1) if "_" in ts_part[:7] else ts_part[:4] + "-" + ts_part[4:6]
+    month_dir = get_sync_archive_root(local_sync_game_dir) / month_str
+    month_dir.mkdir(parents=True, exist_ok=True)
+    local_zip = month_dir / latest_name
+    local_meta = month_dir / meta_name
+
+    def _read_archive_meta(meta_path: Path) -> dict:
+        if not meta_path.exists():
+            return {}
         try:
-            remote_zip_info = _webdav_info_with_variants(client, remote_zip) or {}
+            return load_json_file_tolerant(meta_path, default={}) or {}
         except Exception:
-            remote_zip_info = {}
+            return {}
 
-        # 解析时间戳 -> 本地 YYYY-MM 子目录
-        ts_part = latest_name.replace(".zip", "")
-        month_str = ts_part[:7].replace("_", "-", 1) if "_" in ts_part[:7] else ts_part[:4] + "-" + ts_part[4:6]
-        month_dir = get_sync_archive_root(local_sync_game_dir) / month_str
-        month_dir.mkdir(parents=True, exist_ok=True)
-        local_zip = month_dir / latest_name
-        local_meta = month_dir / meta_name
+    def _validate_local_archive(candidate: Path, meta_data: Optional[dict] = None,
+                                allow_missing_size: bool = True) -> tuple[bool, str]:
+        meta_obj = meta_data if isinstance(meta_data, dict) else _read_archive_meta(local_meta)
+        try:
+            expected_size = int(meta_obj.get("archive_size", 0) or 0)
+        except Exception:
+            expected_size = 0
+        expected_sha256 = str(meta_obj.get("archive_sha256", "") or "").lower()
+        if expected_size:
+            try:
+                if candidate.stat().st_size != expected_size:
+                    return False, f"archive_size_mismatch:{candidate.stat().st_size}!={expected_size}"
+            except Exception as e:
+                return False, f"{type(e).__name__}: {e}"
+        elif not allow_missing_size:
+            return False, "archive_size_missing"
+        ok, zip_msg = validate_zip_archive(candidate)
+        if not ok:
+            return False, zip_msg or "invalid_zip"
+        if expected_sha256 and compute_file_sha256(candidate) != expected_sha256:
+            return False, "archive_sha256_mismatch"
+        return True, ""
 
-        if local_zip.exists():
-            local_meta_data = {}
-            if local_meta.exists():
-                try:
-                    local_meta_data = load_json_file_tolerant(local_meta, default={}) or {}
-                except Exception:
-                    local_meta_data = {}
-            expected_size = int(local_meta_data.get("archive_size", 0) or 0)
-            expected_sha256 = str(local_meta_data.get("archive_sha256", "") or "").lower()
-            if expected_size and local_zip.stat().st_size == expected_size:
-                ok, zip_msg = validate_zip_archive(local_zip)
-                if ok:
-                    if not expected_sha256 or compute_file_sha256(local_zip) == expected_sha256:
-                        return None  # 已缓存且校验通过
+    if local_zip.exists():
+        ok, _ = _validate_local_archive(local_zip, allow_missing_size=True)
+        if ok:
+            if cache_mirror_remote:
+                _prune_webdav_cache_payload(local_sync_game_dir, latest_name)
+            return None
 
-        _webdav_download_with_variants(client, remote_zip, str(local_zip))
+    temp_zip = _atomic_zip_path(local_zip)
+    temp_meta = _atomic_zip_path(local_meta)
+    downloaded_meta = {}
+    try:
+        _webdav_download_with_variants(client, remote_zip, str(temp_zip))
 
-        # 也下载 meta 文件
+        # meta 文件缺失不视为致命；ZIP 本体会继续用远端 size 和 zip 完整性校验。
         try:
             _webdav_download_with_variants(
                 client,
                 f"{archive_dir.rstrip('/')}/{meta_name}",
-                str(local_meta))
+                str(temp_meta))
+            downloaded_meta = _read_archive_meta(temp_meta)
         except Exception:
-            pass
-        meta_data = {}
-        if local_meta.exists():
+            downloaded_meta = {}
             try:
-                meta_data = load_json_file_tolerant(local_meta, default={}) or {}
-            except Exception:
-                meta_data = {}
-        expected_size = int(meta_data.get("archive_size", 0) or 0)
-        expected_sha256 = str(meta_data.get("archive_sha256", "") or "").lower()
-        if not expected_size and remote_zip_info.get("size"):
-            try:
-                expected_size = int(remote_zip_info.get("size", 0) or 0)
-            except Exception:
-                expected_size = 0
-        if expected_size and int(local_zip.stat().st_size) != expected_size:
-            try:
-                local_zip.unlink()
+                temp_meta.unlink(missing_ok=True)
             except Exception:
                 pass
-            return None
-        ok, zip_msg = validate_zip_archive(local_zip)
+        if not downloaded_meta and remote_zip_info.get("size"):
+            try:
+                downloaded_meta = {"archive_size": int(remote_zip_info.get("size", 0) or 0)}
+            except Exception:
+                downloaded_meta = {}
+        ok, zip_msg = _validate_local_archive(temp_zip, downloaded_meta, allow_missing_size=True)
         if not ok:
-            try:
-                local_zip.unlink()
-            except Exception:
-                pass
-            return None
-        if expected_sha256 and compute_file_sha256(local_zip) != expected_sha256:
-            try:
-                local_zip.unlink()
-            except Exception:
-                pass
-            return None
+            raise RuntimeError(f"Downloaded WebDAV archive failed validation: {zip_msg}")
+        temp_zip.replace(local_zip)
+        if temp_meta.exists():
+            temp_meta.replace(local_meta)
+        if cache_mirror_remote:
+            _prune_webdav_cache_payload(local_sync_game_dir, latest_name)
         return str(local_zip)
     except Exception:
-        return None
+        for temp_path in (temp_zip, temp_meta):
+            try:
+                temp_path.unlink(missing_ok=True)
+            except Exception:
+                pass
+        raise
 
 
 def snapshot_dir(directory: str) -> dict:
@@ -5552,6 +5670,12 @@ def clear_game_sync_state(cfg: Optional[dict], game: dict):
 
 def sync_game_save(game: dict, sync_folder: str, mode: str = "smart",
                    auto: bool = False, cfg: Optional[dict] = None) -> str:
+    with SAVE_IO_LOCK:
+        return _sync_game_save_impl(game, sync_folder, mode, auto=auto, cfg=cfg)
+
+
+def _sync_game_save_impl(game: dict, sync_folder: str, mode: str = "smart",
+                         auto: bool = False, cfg: Optional[dict] = None) -> str:
     """
     同步单个游戏的存档。
     mode:
@@ -5699,9 +5823,13 @@ def sync_game_save(game: dict, sync_folder: str, mode: str = "smart",
         """将 src 目录完整镜像到 dst（兼容 OneDrive/Dropbox 等云盘锁定）"""
         dst_p = Path(dst)
         dst_p.mkdir(parents=True, exist_ok=True)
+        failures = []
         # 单次遍历 src：同时复制文件和收集源文件集合
         src_files = set()
-        for root, _, files in os.walk(src):
+        def _record_walk_error(err):
+            failures.append(f"{getattr(err, 'filename', src)}: {type(err).__name__}: {err}")
+
+        for root, _, files in os.walk(src, onerror=_record_walk_error):
             rel = os.path.relpath(root, src)
             target_dir = dst_p / rel if rel != "." else dst_p
             target_dir.mkdir(parents=True, exist_ok=True)
@@ -5711,22 +5839,24 @@ def sync_game_save(game: dict, sync_folder: str, mode: str = "smart",
                 dst_file = target_dir / file_name
                 try:
                     shutil.copy2(src_file, dst_file)
-                except PermissionError:
+                except OSError:
                     time.sleep(0.5)
                     try:
                         shutil.copy2(src_file, dst_file)
-                    except PermissionError:
-                        pass
+                    except OSError as e:
+                        failures.append(f"{src_file} -> {dst_file}: {type(e).__name__}: {e}")
         # 单次遍历 dst：删除 src 中不存在的文件
-        for root, _, files in os.walk(str(dst_p)):
+        for root, _, files in os.walk(str(dst_p), onerror=_record_walk_error):
             rel = os.path.relpath(root, str(dst_p))
             for file_name in files:
                 rel_path = os.path.normpath(os.path.join(rel, file_name))
                 if rel_path not in src_files:
                     try:
                         os.remove(os.path.join(root, file_name))
-                    except (PermissionError, OSError):
-                        pass
+                    except OSError as e:
+                        failures.append(f"{os.path.join(root, file_name)}: {type(e).__name__}: {e}")
+        if failures:
+            raise OSError("Mirror copy did not complete: " + "; ".join(failures[:5]))
 
     def _create_remote_archive():
         nonlocal webdav_error
@@ -5961,6 +6091,11 @@ def _open_zip_for_write(zip_path: Path | str):
     return zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED, strict_timestamps=False)
 
 
+def _atomic_zip_path(final_path: Path | str) -> Path:
+    final = Path(final_path)
+    return final.with_name(f".{final.stem}.{os.getpid()}.{threading.get_ident()}.{uuid.uuid4().hex}.tmp")
+
+
 def _zip_write_file(zf: zipfile.ZipFile, file_path: Path | str, arcname: Path | str):
     src_path = Path(file_path)
     arcname_str = Path(arcname).as_posix()
@@ -5971,6 +6106,34 @@ def _zip_write_file(zf: zipfile.ZipFile, file_path: Path | str, arcname: Path | 
     info.external_attr = (st.st_mode & 0xFFFF) << 16
     with src_path.open("rb") as src, zf.open(info, "w") as dst:
         shutil.copyfileobj(src, dst, length=1024 * 1024)
+
+
+def package_save_folder_to_zip(folder: Path | str, zip_path: Path | str) -> int:
+    source_dir = Path(folder)
+    target_zip = Path(zip_path)
+    temp_zip = _atomic_zip_path(target_zip)
+    file_count = 0
+    try:
+        with _open_zip_for_write(temp_zip) as zf:
+            for root, _, files in os.walk(source_dir):
+                for file in files:
+                    abs_file = Path(root) / file
+                    rel = abs_file.relative_to(source_dir).as_posix()
+                    if _is_ignored_save_payload_file(rel):
+                        continue
+                    _zip_write_file(zf, abs_file, rel)
+                    file_count += 1
+        if file_count <= 0:
+            temp_zip.unlink(missing_ok=True)
+            return 0
+        temp_zip.replace(target_zip)
+        return file_count
+    except Exception:
+        try:
+            temp_zip.unlink(missing_ok=True)
+        except Exception:
+            pass
+        raise
 
 
 def load_json_file_tolerant(path: Path | str, default=None, repair: bool = True):
@@ -6007,6 +6170,11 @@ def load_json_file_tolerant(path: Path | str, default=None, repair: bool = True)
 
 
 def create_backup(game: dict, note: str = "", extra_meta: Optional[dict] = None) -> Optional[str]:
+    with SAVE_IO_LOCK:
+        return _create_backup_impl(game, note, extra_meta)
+
+
+def _create_backup_impl(game: dict, note: str = "", extra_meta: Optional[dict] = None) -> Optional[str]:
     save_specs = get_game_save_specs(game, existing_only=True)
     if not save_specs:
         return None
@@ -6025,11 +6193,28 @@ def create_backup(game: dict, note: str = "", extra_meta: Optional[dict] = None)
         zip_path = game_dir / f"{ts}_{suffix}.zip"
         suffix += 1
     is_multi = len(save_specs) > 1
-    with _open_zip_for_write(zip_path) as zf:
-        for idx, _, abs_f, rel in iter_save_spec_files(save_specs):
-            arc_prefix = Path("__multi__") / f"p{idx}" if is_multi else Path()
-            arcname = arc_prefix / Path(rel) if is_multi else Path(rel)
-            _zip_write_file(zf, abs_f, arcname)
+    temp_zip_path = _atomic_zip_path(zip_path)
+    file_count = 0
+    try:
+        with _open_zip_for_write(temp_zip_path) as zf:
+            for idx, _, abs_f, rel in iter_save_spec_files(save_specs):
+                arc_prefix = Path("__multi__") / f"p{idx}" if is_multi else Path()
+                arcname = arc_prefix / Path(rel) if is_multi else Path(rel)
+                _zip_write_file(zf, abs_f, arcname)
+                file_count += 1
+        if file_count <= 0:
+            try:
+                temp_zip_path.unlink(missing_ok=True)
+            except Exception:
+                pass
+            return None
+        temp_zip_path.replace(zip_path)
+    except Exception:
+        try:
+            temp_zip_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+        raise
     meta = {
         "game": game["name"], "appid": game.get("appid", ""),
         "game_uid": get_game_uid(game),
@@ -6155,7 +6340,10 @@ def _zip_safe_restore_path(base_dir: Path, relative_name: str) -> Path:
 
 
 def _plan_backup_restore_entries(zf: zipfile.ZipFile, target_specs: list[dict]) -> list[tuple[int, dict, str, Path]]:
-    members = [info.filename for info in zf.infolist() if info.filename and not info.is_dir()]
+    members = [
+        info.filename for info in zf.infolist()
+        if info.filename and not info.is_dir() and not _is_ignored_save_payload_file(info.filename)
+    ]
     entries: list[tuple[int, dict, str, Path]] = []
     is_multi = any(name.startswith("__multi__/p") for name in members)
     if not is_multi:
@@ -6196,21 +6384,43 @@ def restore_backup(zip_path: str, target_dir):
         for _, spec, _, _ in restore_entries:
             target = Path(spec["base"])
             touched_dirs[os.path.normcase(os.path.normpath(str(target)))] = target
+        restore_records: dict[str, tuple[Path, Optional[Path], bool]] = {}
         for target in touched_dirs.values():
+            target_key = os.path.normcase(os.path.normpath(str(target)))
             if target.exists():
-                shutil.copytree(target, _restore_safety_dir(target))
+                safety_dir = _restore_safety_dir(target)
+                shutil.copytree(target, safety_dir)
+                restore_records[target_key] = (target, safety_dir, True)
             else:
                 target.mkdir(parents=True, exist_ok=True)
-        prepared_targets = set()
-        for target_idx, spec, _, _ in restore_entries:
-            if target_idx in prepared_targets:
-                continue
-            _remove_matching_spec_files(spec)
-            prepared_targets.add(target_idx)
-        for _, _, member, dest in restore_entries:
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            with zf.open(member) as src, open(dest, "wb") as dst:
-                shutil.copyfileobj(src, dst)
+                restore_records[target_key] = (target, None, False)
+        try:
+            prepared_targets = set()
+            for target_idx, spec, _, _ in restore_entries:
+                if target_idx in prepared_targets:
+                    continue
+                _remove_matching_spec_files(spec)
+                prepared_targets.add(target_idx)
+            for _, _, member, dest in restore_entries:
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                with zf.open(member) as src, open(dest, "wb") as dst:
+                    shutil.copyfileobj(src, dst)
+        except Exception as restore_error:
+            rollback_errors = []
+            for target, safety_dir, existed_before in restore_records.values():
+                try:
+                    if target.exists():
+                        shutil.rmtree(target)
+                    if existed_before and safety_dir is not None and safety_dir.exists():
+                        shutil.copytree(safety_dir, target)
+                except Exception as rollback_error:
+                    rollback_errors.append(f"{target}: {type(rollback_error).__name__}: {rollback_error}")
+            if rollback_errors:
+                raise RuntimeError(
+                    f"Restore failed and rollback was incomplete: {restore_error}; "
+                    + "; ".join(rollback_errors[:5])
+                ) from restore_error
+            raise RuntimeError(f"Restore failed and the previous save was restored: {restore_error}") from restore_error
 
 
 def get_backups(game_ref) -> list:
@@ -9129,15 +9339,25 @@ class SteamSaveManager(ctk.CTk):
             ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
             zp = gd / f"{ts}_imported.zip"
             fp = Path(folder)
-            with _open_zip_for_write(zp) as zf:
-                for root, _, files in os.walk(fp):
-                    for file in files:
-                        af = Path(root) / file
-                        _zip_write_file(zf, af, af.relative_to(fp))
+            try:
+                file_count = package_save_folder_to_zip(fp, zp)
+                if file_count <= 0:
+                    self._show_warning(
+                        self.bi("导入失败", "Import Failed"),
+                        self.bi("所选文件夹中没有可导入的存档文件。", "No importable save files were found in the selected folder."),
+                    )
+                    return
+            except Exception as e:
+                self._show_error(
+                    self.bi("导入失败", "Import Failed"),
+                    self.bi(f"打包导入文件夹失败：\n{type(e).__name__}: {e}",
+                            f"Failed to package the imported folder:\n{type(e).__name__}: {e}"),
+                )
+                return
             meta = {"game": g["name"], "appid": g.get("appid", ""),
                     "game_uid": get_game_uid(g), "storage_key": str(g.get("storage_key", "") or ""),
                     "timestamp": ts, "note": self.bi("导入的存档文件夹", "Imported save folder"),
-                    "source": folder, "size": zp.stat().st_size}
+                    "source": folder, "size": zp.stat().st_size, "file_count": file_count}
             with open(zp.with_suffix(".meta.json"), "w", encoding="utf-8") as f:
                 json.dump(meta, f, ensure_ascii=False, indent=2)
             if self._ask_yes_no(self.bi("导入成功", "Import Complete"), self.bi("已打包为备份！\n是否立即还原？", "Packed as a backup.\nRestore it now?")):
@@ -9890,6 +10110,7 @@ class SteamSaveManager(ctk.CTk):
         try:
             manifest = fetch_update_manifest()
         except Exception as e:
+            err_text = f"{type(e).__name__}: {e}"
             def _on_error():
                 self._set_about_update_state(
                     text=self.bi("更新状态：检查失败", "Update status: failed to check"),
@@ -9902,8 +10123,8 @@ class SteamSaveManager(ctk.CTk):
                 if not silent:
                     self._show_error(
                         self.bi("检查更新失败", "Update Check Failed"),
-                        self.bi(f"无法读取远程更新信息：\n{type(e).__name__}: {e}",
-                                f"Could not read remote update info:\n{type(e).__name__}: {e}"),
+                        self.bi(f"无法读取远程更新信息：\n{err_text}",
+                                f"Could not read remote update info:\n{err_text}"),
                         parent=self._about_dialog,
                     )
             self.after(0, _on_error)
@@ -10003,6 +10224,7 @@ class SteamSaveManager(ctk.CTk):
         try:
             target = download_update_package(manifest, get_update_download_dir())
         except Exception as e:
+            err_text = f"{type(e).__name__}: {e}"
             self.after(0, lambda: (
                 self._set_about_update_state(
                     text=self.bi("更新状态：下载失败", "Update status: download failed"),
@@ -10010,8 +10232,8 @@ class SteamSaveManager(ctk.CTk):
                 ),
                 self._show_error(
                     self.bi("下载更新失败", "Update Download Failed"),
-                    self.bi(f"下载更新时出错：\n{type(e).__name__}: {e}",
-                            f"An error occurred while downloading the update:\n{type(e).__name__}: {e}"),
+                    self.bi(f"下载更新时出错：\n{err_text}",
+                            f"An error occurred while downloading the update:\n{err_text}"),
                     parent=self._about_dialog,
                 )
             ))
@@ -10042,7 +10264,7 @@ class SteamSaveManager(ctk.CTk):
     def _launch_downloaded_update(self, target: Path):
         try:
             if sys.platform == "win32":
-                current_exe = Path(os.path.abspath(sys.argv[0]))
+                current_exe = _current_executable_path()
                 backup_old = True
                 if getattr(sys, "frozen", False) and current_exe.resolve() != target.resolve():
                     backup_old = self._ask_yes_no(
@@ -10054,13 +10276,13 @@ class SteamSaveManager(ctk.CTk):
                         parent=self._about_dialog,
                     )
                     command = _build_windows_replace_and_launch_command(
-                        target, current_exe, backup_old=backup_old
+                        target, current_exe, current_pid=os.getpid(), backup_old=backup_old
                     )
                 else:
                     escaped_target = str(target).replace("'", "''")
                     command = f"Start-Sleep -Seconds 1; Start-Process -FilePath '{escaped_target}'"
                 subprocess.Popen(
-                    ["powershell", "-WindowStyle", "Hidden", "-Command", command],
+                    ["powershell.exe", "-NoProfile", "-WindowStyle", "Hidden", "-Command", command],
                     creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
                 )
             else:
