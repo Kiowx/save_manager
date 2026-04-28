@@ -1,6 +1,6 @@
 {
-  "version": "1.4.1",
-  "sha256": "e14982a9dc08cba6c9f693f86cc99efb5f906ffb7f5f9f7e6564847850f44d1a",
-  "notes": "1. 修复 .log/.tmp/.temp 等非存档文件进入备份/同步包、触发文件监控自动备份，以及旧 log-only 包还原时可能误删真实存档的问题\n2. 修复备份失败仍留下半成品 ZIP 的问题，现在备份/同步归档均采用原子写入，真实存档被占用时不会生成坏备份，也不会影响备份轮转\n3. 修复 WebDAV 下载失败、校验失败或坏 ZIP 被误判为“云端为空”的问题，同步镜像复制/删除失败时也会明确报错\n4. 修复还原过程中写入失败后需要手动恢复的问题，现在会自动回滚到还原前的存档状态\n5. 修复导入存档文件夹时可能留下半成品备份的问题，并自动过滤日志和临时文件\n6. 修复自动更新错误信息可能无法正常显示、替换旧版本时过早执行的问题\n7. 自动备份和自动同步现在会串行执行，避免两个定时任务同时读写存档造成卡顿或冲突\n8. 更新包下载后会校验基础 Windows EXE 签名，替换失败时会保留错误日志方便排查",
-  "url": "https://github.com/Kiowx/save_manager/releases/download/v1.4.1/SteamSaveManager.exe"
+  "version": "1.4.2",
+  "notes": "1. 修复存档路径识别的核心映射错误，此前 Root ID 到本地路径的映射几乎完全颠倒，导致大量游戏的存档目录被错误定位。现已按照 Steam SDK 官方枚举重新修正全部映射，并补全了此前缺失的 Saved Games、ProgramData、LocalLow 和 UserProfile 路径支持\n2. 降低了 steam-remote 和 steam-app-root 来源的评分权重，不再无条件信任这些来源，避免将用户数据目录或安装目录误判为存档路径\n3. 新增从本地 appinfo.vdf 提取应用类型的功能，可以自动识别并过滤工具、DLC、Demo 等非游戏应用，不再对它们执行无意义的存档扫描。同时保留了 AppID 黑名单和名称关键词作为兜底过滤\n4. 修复短名游戏（如 Rust、Apex）在目录搜索时因子串匹配过于宽松而误匹配大量无关目录的问题，现在要求匹配双方的长度比例不低于 50%\n5. 修复 Windows 桌面通知的 NotifyIcon 方案因 PowerShell while 循环缺少花括号而永远失败的语法错误。修复 Toast 通知在游戏名包含 & 字符时因 XML 转义不完整导致通知发送失败的问题\n6. 修复 UFS 缓存在多线程环境下读写未加锁的竞态条件\n7. 优化存档文件过滤逻辑，新增轻量级的文件存在性检查函数，避免仅为判断目录是否包含文件就执行完整的目录遍历和 MD5 哈希计算",
+  "url": "https://github.com/Kiowx/save_manager/releases/download/v1.4.2/SteamSaveManager.exe",
+  "sha256": "6080110a93b87b3697dac434c6df31d4bcec270bd6c85d00a0603b85f3ff5659"
 }
