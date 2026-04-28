@@ -1,6 +1,6 @@
 {
-  "version": "1.4.2",
-  "notes": "1. 修复存档路径识别的核心映射错误，此前 Root ID 到本地路径的映射几乎完全颠倒，导致大量游戏的存档目录被错误定位。现已按照 Steam SDK 官方枚举重新修正全部映射，并补全了此前缺失的 Saved Games、ProgramData、LocalLow 和 UserProfile 路径支持\n2. 降低了 steam-remote 和 steam-app-root 来源的评分权重，不再无条件信任这些来源，避免将用户数据目录或安装目录误判为存档路径\n3. 新增从本地 appinfo.vdf 提取应用类型的功能，可以自动识别并过滤工具、DLC、Demo 等非游戏应用，不再对它们执行无意义的存档扫描。同时保留了 AppID 黑名单和名称关键词作为兜底过滤\n4. 修复短名游戏（如 Rust、Apex）在目录搜索时因子串匹配过于宽松而误匹配大量无关目录的问题，现在要求匹配双方的长度比例不低于 50%\n5. 修复 Windows 桌面通知的 NotifyIcon 方案因 PowerShell while 循环缺少花括号而永远失败的语法错误。修复 Toast 通知在游戏名包含 & 字符时因 XML 转义不完整导致通知发送失败的问题\n6. 修复 UFS 缓存在多线程环境下读写未加锁的竞态条件\n7. 优化存档文件过滤逻辑，新增轻量级的文件存在性检查函数，避免仅为判断目录是否包含文件就执行完整的目录遍历和 MD5 哈希计算",
   "url": "https://github.com/Kiowx/save_manager/releases/download/v1.4.2/SteamSaveManager.exe",
-  "sha256": "6080110a93b87b3697dac434c6df31d4bcec270bd6c85d00a0603b85f3ff5659"
+  "sha256": "36b50c2bcbc8e9ecd3322a17eaa822d517120c3993a80bcd21488ecb8443575d",
+  "version": "1.4.2",
+  "notes": "1. 修复存档路径识别的核心映射错误，此前 Root ID 到本地路径的映射几乎完全颠倒，导致大量游戏的存档目录被错误定位。现已按照 Steam SDK 官方枚举重新修正全部映射，并补全了此前缺失的 Saved Games、ProgramData、LocalLow 和 UserProfile 路径支持\n2. 降低了 steam-remote 和 steam-app-root 来源的评分权重，不再无条件信任这些来源，避免将用户数据目录或安装目录误判为存档路径\n3. 新增从本地 appinfo.vdf 提取应用类型的功能，可以自动识别并过滤工具、DLC、Demo 等非游戏应用，不再对它们执行无意义的存档扫描。同时保留了 AppID 黑名单和名称关键词作为兜底过滤\n4. 修复短名游戏（如 Rust、Apex）在目录搜索时因子串匹配过于宽松而误匹配大量无关目录的问题，现在要求匹配双方的长度比例不低于 50%\n5. 修复 Windows 桌面通知的 NotifyIcon 方案因 PowerShell while 循环缺少花括号而永远失败的语法错误。修复 Toast 通知在游戏名包含 & 字符时因 XML 转义不完整导致通知发送失败的问题\n6. 修复 UFS 缓存在多线程环境下读写未加锁的竞态条件\n7. 优化存档文件过滤逻辑，新增轻量级的文件存在性检查函数，避免仅为判断目录是否包含文件就执行完整的目录遍历和 MD5 哈希计算"
 }
