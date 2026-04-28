@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Steam 游戏存档备份管理器 v1.4.1 — 通用版"""
+"""Steam 游戏存档备份管理器 v1.4.2 — 通用版"""
 
 import os
 import sys
@@ -101,7 +101,7 @@ except ImportError as exc:
 # ══════════════════════════════════════════════
 
 APP_NAME = "Steam Save Manager"
-VERSION = "1.4.1"
+VERSION = "1.4.2"
 APP_DIR = Path(os.path.dirname(os.path.abspath(sys.argv[0])))
 LEGACY_CONFIG_DIR = Path.home() / ".steam_save_manager"
 STARTUP_AUTOSTART_FLAG = "--startup-launch"
@@ -1193,11 +1193,38 @@ def parse_acf(acf_path: str) -> dict:
         return {}
 
 
+# 已知的非游戏系统级 AppID，不应出现在扫描结果中
+_NON_GAME_APPIDS = {
+    "7",       # Steam Client
+    "228980",  # Steamworks Common Redistributables
+    "1007",    # Steam Client Windows
+    "1070560", # Steam Linux Runtime
+    "1391110", # Steam Linux Runtime - Soldier
+    "1628350", # Steam Linux Runtime - Sniper
+    "250820",  # SteamVR
+    "323180",  # SteamVR Workshop Tools
+    "744350",  # Steam Chat Images
+}
+
+
+# 被视为"游戏"的 app type（来自 appinfo.vdf common.type 字段）
+# 不在此集合中的类型（如 Tool, DLC, Demo, Config, Music）将被过滤
+_APPINFO_GAME_TYPES = {"game", "Game"}
+
+
 def scan_installed_games(steam_path: str) -> list[dict]:
     """
     扫描所有 Steam 库文件夹，返回已安装游戏列表
     每项: {appid, name, install_dir, library_path}
+    通过三层过滤排除非游戏应用:
+      1. appinfo.vdf 中的 common.type 字段（最可靠）
+      2. 已知的非游戏 AppID 黑名单
+      3. 名称模式匹配（兜底）
     """
+    # 预加载 appinfo 以获取 app type 信息
+    if steam_path:
+        _load_appinfo_vdf(steam_path)
+
     games = []
     seen_ids = set()
     for lib_folder in get_steam_library_folders(steam_path):
@@ -1212,15 +1239,32 @@ def scan_installed_games(steam_path: str) -> list[dict]:
                 appid = app_state.get("appid", "")
                 name = app_state.get("name", "")
                 install_dir = app_state.get("installdir", "")
-                if appid and name and appid not in seen_ids:
-                    seen_ids.add(appid)
-                    full_install = os.path.join(steamapps, "common", install_dir)
-                    games.append({
-                        "appid": appid,
-                        "name": name,
-                        "install_dir": full_install if os.path.isdir(full_install) else "",
-                        "library_path": lib_folder,
-                    })
+                if not appid or not name or appid in seen_ids:
+                    continue
+                # 过滤已知的非游戏 AppID
+                if appid in _NON_GAME_APPIDS:
+                    continue
+                # 通过 appinfo.vdf 的 common.type 过滤非游戏应用（最可靠）
+                app_type = _APPINFO_TYPE_MAP.get(appid, "")
+                if app_type and app_type not in _APPINFO_GAME_TYPES:
+                    continue
+                # 通过名称模式过滤常见的非游戏应用（兜底，处理 appinfo 未覆盖的情况）
+                name_lower = name.lower()
+                if any(pattern in name_lower for pattern in (
+                    "redistributable", "redist",
+                    "dedicated server", "dedicated_server",
+                    "sdk", "runtime",
+                    "proton ", "proton-",
+                )):
+                    continue
+                seen_ids.add(appid)
+                full_install = os.path.join(steamapps, "common", install_dir)
+                games.append({
+                    "appid": appid,
+                    "name": name,
+                    "install_dir": full_install if os.path.isdir(full_install) else "",
+                    "library_path": lib_folder,
+                })
     games.sort(key=lambda g: g["name"].lower())
     return games
 
@@ -1541,9 +1585,59 @@ _INSTALLED_GAME_INFO_CACHE: dict[str, dict[str, dict]] = {}
 _INSTALLED_GAME_INFO_CACHE_LOCK = threading.Lock()
 
 
+_APPINFO_TYPE_MAP: dict[str, str] = {}  # appid -> app type ("Game", "Tool", "DLC", etc.)
+
+
+def _extract_app_type_fast(record_data: bytes) -> str:
+    """
+    从 appinfo 记录的二进制 KV 数据中快速提取 common.type 字段。
+    利用字节模式搜索避免完整解析，性能开销极低。
+    二进制 KV 中 string 值的格式: 0x01 + key_null_terminated + value_null_terminated
+    在 common dict 内部查找 type 键的 string 值。
+    """
+    # 搜索 "type\x00" 后跟一个 null-terminated 字符串
+    # 在 common dict 的上下文中，type 字段的值为 "Game", "Tool", "DLC", "Demo", "Config", "Music" 等
+    kv_start = 60
+    if kv_start >= len(record_data):
+        return ""
+    kv_data = record_data[kv_start:]
+
+    # 快速搜索: 找到 common 节内的 type 字段
+    # binary KV 中 string value 格式: 0x01 + "type\x00" + "Game\x00"
+    marker = b"\x01type\x00"
+    # 先确认在 common 节内
+    common_marker = b"\x00common\x00"
+    common_pos = kv_data.find(common_marker)
+    if common_pos < 0:
+        return ""
+
+    # 从 common 节开始搜索 type 字段
+    search_start = common_pos
+    # 限制搜索范围到 common 节结束前（最多搜索 2KB）
+    search_end = min(search_start + 2048, len(kv_data))
+    type_pos = kv_data.find(marker, search_start, search_end)
+    if type_pos < 0:
+        return ""
+
+    # 读取 type 值（null-terminated string）
+    val_start = type_pos + len(marker)
+    val_end = kv_data.find(b'\x00', val_start)
+    if val_end < 0 or val_end - val_start > 30:  # type 值不应超过 30 字符
+        return ""
+    value = kv_data[val_start:val_end].decode("utf-8", errors="ignore")
+    # 校验：仅返回已知的 Steam app type 值，防止误匹配其他 type 键
+    _KNOWN_APP_TYPES = {
+        "Game", "game", "Tool", "tool", "DLC", "dlc", "Demo", "demo",
+        "Config", "config", "Music", "music", "Video", "video",
+        "Series", "series", "Hardware", "hardware", "Application", "application",
+    }
+    return value if value in _KNOWN_APP_TYPES else ""
+
+
 def _load_appinfo_vdf(steam_path: str):
     """
     解析 Steam appinfo.vdf 二进制文件，提取每个 appid 的 UFS savefiles 配置。
+    同时提取 common.type 字段用于区分游戏/工具/DLC 等应用类型。
     格式: magic(4B) + universe(4B) + records...
     每条记录: appid(4B LE) + size(4B LE) + ... + binary KV data + 0x00 sentinel
     appinfo.vdf v28/v29 格式（Steam 2024+）：
@@ -1551,12 +1645,13 @@ def _load_appinfo_vdf(steam_path: str):
       record: appid(4B) + size(4B) + state(4B) + last_updated(4B) + token(8B)
               + sha1(20B) + change_number(4B) + sha1_2(20B) + binary_kv_data
     """
-    global _APPINFO_LOADED, _APPINFO_DATA, _APPINFO_UFS_CACHE, _APPINFO_LOADED_PATH
+    global _APPINFO_LOADED, _APPINFO_DATA, _APPINFO_UFS_CACHE, _APPINFO_LOADED_PATH, _APPINFO_TYPE_MAP
     normalized_steam_path = os.path.normpath(steam_path) if steam_path else ""
     if _APPINFO_LOADED and normalized_steam_path == _APPINFO_LOADED_PATH:
         return
     _APPINFO_DATA = {}
     _APPINFO_UFS_CACHE.clear()
+    _APPINFO_TYPE_MAP = {}
     _APPINFO_LOADED = True
     _APPINFO_LOADED_PATH = normalized_steam_path
 
@@ -1590,6 +1685,11 @@ def _load_appinfo_vdf(steam_path: str):
                 break
             record_data = data[pos:pos + size]
             pos += size
+
+            # 提取 app type（快速字节搜索，开销极低）
+            app_type = _extract_app_type_fast(record_data)
+            if app_type:
+                _APPINFO_TYPE_MAP[str(appid)] = app_type
 
             # 快速检查：只处理包含 "savefiles" 的记录
             if b"savefiles" not in record_data:
@@ -1719,13 +1819,19 @@ def _extract_ufs_savefiles(record_data: bytes) -> list[dict]:
     return results
 
 
+# Root ID 映射 — 来源: Steam SDK ERemoteStorageFileRoot 枚举
+# https://github.com/emily33901/SteamStructs/blob/master/ERemoteStorageFileRoot.h
+# Root 0 (Default) = userdata/{UID}/{AppID}/remote/，由 remotecache 步骤处理，不在此映射
 _APPINFO_ROOT_MAP = {
-    "0": "[Game Install]",
-    "1": "[WinMyDocuments]",
-    "2": "[WinAppDataRoaming]",
-    "3": "%USERPROFILE%",
-    "4": "[WinAppDataLocal]",
-    "5": "[WinAppDataLocalLow]",  # Unity 游戏常用
+    "1": "[Game Install]",         # k_ERemoteStorageFileRootGameInstall
+    "2": "[WinMyDocuments]",       # k_ERemoteStorageFileRootWinMyDocuments
+    "3": "[WinAppDataLocal]",      # k_ERemoteStorageFileRootWinAppDataLocal
+    "4": "[WinAppDataRoaming]",    # k_ERemoteStorageFileRootWinAppDataRoaming
+    # "5": SteamUserBaseStorage — 用途待验证，暂不映射
+    "9": "[WinSavedGames]",        # k_ERemoteStorageFileRootWinSavedGames
+    "10": "[WinProgramData]",      # k_ERemoteStorageFileRootWinProgramData
+    "12": "[WinAppDataLocalLow]",  # k_ERemoteStorageFileRootWinAppDataLocalLow (Unity 常用)
+    "18": "%USERPROFILE%",         # WindowsHome
 }
 
 _STEAM_TEMPLATE_PATH_HINTS = tuple(token.lower() for token in (
@@ -1823,9 +1929,10 @@ def parse_appinfo_ufs_entries(steam_path: str, appid: str) -> list[dict]:
     if not appid or not steam_path:
         return []
 
-    cached = _APPINFO_UFS_CACHE.get(appid)
-    if cached is not None:
-        return list(cached)
+    with _APPINFO_UFS_CACHE_LOCK:
+        cached = _APPINFO_UFS_CACHE.get(appid)
+        if cached is not None:
+            return list(cached)
 
     _load_appinfo_vdf(steam_path)
 
@@ -1845,6 +1952,20 @@ def parse_appinfo_ufs_entries(steam_path: str, appid: str) -> list[dict]:
 
         root_prefix = _APPINFO_ROOT_MAP.get(root)
         if root_prefix is None:
+            if root == "0":
+                # Root 0 (Default) = userdata/{UID}/{AppID}/remote/
+                # 不生成路径模板（由 remotecache 步骤处理），但保留 includes/pattern 信息
+                # 这样 remotecache 候选可以继承精确的文件匹配规则
+                if includes:
+                    root0_key = ("__root0__", tuple(p.lower() for p in includes), recursive)
+                    if root0_key not in seen:
+                        seen.add(root0_key)
+                        templates.append({
+                            "template": "__root0__",
+                            "includes": includes,
+                            "recursive": recursive,
+                            "root_id": "0",
+                        })
             continue
         template = f"{root_prefix}/{clean_path}" if clean_path else root_prefix
         recursive_value = entry.get("recursive", None)
@@ -1862,7 +1983,8 @@ def parse_appinfo_ufs_entries(steam_path: str, appid: str) -> list[dict]:
                 "recursive": recursive,
             })
 
-    _APPINFO_UFS_CACHE[appid] = templates
+    with _APPINFO_UFS_CACHE_LOCK:
+        _APPINFO_UFS_CACHE[appid] = templates
     return list(templates)
 
 
@@ -2442,6 +2564,13 @@ def compute_save_spec_file_count(specs: list[dict]) -> int:
     return compute_save_spec_snapshot(specs)["file_count"]
 
 
+def has_any_matching_files(specs: list[dict]) -> bool:
+    """轻量检查：是否存在至少一个匹配文件，找到即返回，不做哈希计算。"""
+    for _, _, _, _ in iter_save_spec_files(specs):
+        return True
+    return False
+
+
 def compute_save_spec_latest_mtime(specs: list[dict]) -> float:
     return compute_save_spec_snapshot(specs)["latest_mtime"]
 
@@ -2553,7 +2682,7 @@ def _infer_precise_metadata_specs_for_game(game: Optional[dict], steam_path: str
     if candidate_specs:
         return [
             spec for spec in candidate_specs
-            if compute_save_spec_file_count([spec]) > 0
+            if has_any_matching_files([spec])
         ]
     return []
 
@@ -3140,7 +3269,9 @@ def has_install_root_save_files(path: str) -> bool:
     signals = _gather_candidate_file_signals(path, max_depth=0, max_files=40)
     strong_hits = int(signals.get("strong_names", 0)) + int(signals.get("strong_exts", 0))
     weak_hits = int(signals.get("weak_names", 0)) + int(signals.get("weak_exts", 0))
-    return strong_hits >= 1 or (strong_hits == 0 and weak_hits >= 2)
+    # 收紧判定：至少需要 1 个强信号，或需要同时有弱文件名 + 弱扩展名信号
+    # 避免仅凭 .dat/.bin 等通用扩展名就把安装目录当存档目录
+    return strong_hits >= 1 or (int(signals.get("weak_names", 0)) >= 1 and int(signals.get("weak_exts", 0)) >= 1)
 
 
 def infer_install_root_file_specs(path: str) -> list[dict]:
@@ -3193,8 +3324,16 @@ def should_accept_candidate(source: str, base_score: int, detail: dict) -> bool:
     signals = detail.get("signals", {})
     positive_hits = int(signals.get("positive_names", 0)) + int(signals.get("positive_exts", 0))
 
-    if source in {"confirmed", "known-path", "remotecache", "steam-autocloud", "steam-remote", "steam-app-root", "steamdb", "appinfo"}:
+    if source in {"confirmed", "known-path", "remotecache", "steam-autocloud", "steamdb", "appinfo"}:
         return True
+
+    # steam-remote / steam-app-root 仅作为 userdata 目录线索，需要有实际存档信号才接受
+    if source in {"steam-remote", "steam-app-root"}:
+        return (
+            confidence != "low"
+            or "save-files" in reasons
+            or positive_hits >= 1
+        )
 
     if source == "install-root-files":
         return (
@@ -3243,8 +3382,11 @@ def prune_save_candidates(candidates: list[dict]) -> list[dict]:
         confidence = candidate.get("confidence", "low")
         source = candidate.get("source", "")
         score = int(candidate.get("score", 0))
-        if source in {"confirmed", "cache", "known-path", "remotecache", "steam-autocloud", "steam-remote", "steam-app-root", "steamdb", "appinfo"}:
+        if source in {"confirmed", "cache", "known-path", "remotecache", "steam-autocloud", "steamdb", "appinfo"}:
             keep = True
+        elif source in {"steam-remote", "steam-app-root"}:
+            # userdata 目录仅在有存档信号或高分时保留
+            keep = confidence != "low" or score >= top_score - 8
         elif top_score >= 105:
             keep = score >= top_score - 12 and confidence != "low"
         elif top_score >= 90:
@@ -3266,12 +3408,16 @@ def _guess_remotecache_bases(root_id: str, install_dir: str) -> list[str]:
     根据 remotecache.vdf 中的 root 编号猜测本地根目录。
     猜不准时回退到常见存档根目录全尝试。
     """
+    # Root ID 映射 — 与 _APPINFO_ROOT_MAP 保持一致 (Steam SDK ERemoteStorageFileRoot)
     root_map = {
-        "0": [install_dir] if install_dir else [],
-        "1": [str(DOCUMENTS), str(SAVED_GAMES), str(DOCUMENTS / "My Games")],
-        "2": [str(APPDATA)],
-        "3": [str(LOCAL_APPDATA)],
-        "4": [str(LOCAL_LOW)],
+        # Root 0 (Default) = userdata/remote，由 remotecache 步骤自身处理
+        "1": [install_dir] if install_dir else [],              # GameInstall
+        "2": [str(DOCUMENTS), str(SAVED_GAMES), str(DOCUMENTS / "My Games")],  # WinMyDocuments
+        "3": [str(LOCAL_APPDATA)],                               # WinAppDataLocal
+        "4": [str(APPDATA)],                                     # WinAppDataRoaming
+        "9": [str(SAVED_GAMES)],                                 # WinSavedGames
+        "10": [str(PROGRAMDATA)],                                # WinProgramData
+        "12": [str(LOCAL_LOW)],                                  # WinAppDataLocalLow
     }
     bases = list(root_map.get(str(root_id), []))
     for base in [str(b) for b in COMMON_SAVE_BASES]:
@@ -3428,10 +3574,18 @@ def find_save_in_directory(base: str, game_name: str) -> list[str]:
             entry_norm = _normalize_recognition_name(dirname)
             depth = os.path.normpath(path).count(os.sep) - base_depth
             match_score = 0
-            if name_lower in entry_lower or entry_lower in name_lower:
+            # 防止短名游戏（如 "Rust"、"Apex"）误匹配大量无关目录
+            if name_norm and entry_norm == name_norm:
                 match_score = 3
-            elif name_norm and entry_norm == name_norm:
-                match_score = 3
+            elif len(name_lower) >= 4 and len(entry_lower) >= 4 and (
+                name_lower in entry_lower or entry_lower in name_lower
+            ):
+                # 子串匹配需要较短的一方至少达到较长方长度的 50%
+                # 例: "Rust"(4) vs "RustConfig"(10) → 40% < 50% → 不匹配
+                # 例: "Hades"(5) vs "Hades II"(8) → 62% > 50% → 匹配
+                shorter, longer = min(len(name_lower), len(entry_lower)), max(len(name_lower), len(entry_lower))
+                if shorter * 2 >= longer:
+                    match_score = 3
             elif len(keywords) >= 2 and sum(1 for kw in keywords[:5] if len(kw) > 2 and kw in entry_lower) >= 2:
                 match_score = 2
             elif len(keywords) >= 1 and len(keywords[0]) > 5 and (
@@ -3690,7 +3844,7 @@ def detect_save_candidates(appid: str, game_name: str,
         for path in find_save_in_directory(str(base), game_name):
             _add(path, 78, "system-search")
 
-    # 4) remotecache.vdf 联动线索
+    # 4) remotecache.vdf 联动线索 + Steam userdata/<uid>/<appid>/remote
     remotecache_entries = get_remotecache_entries(appid, steam_path, install_dir, preferred_accountids)
     for entry in remotecache_entries:
         local_candidates = entry.get("local_candidates", [])
@@ -3698,14 +3852,12 @@ def detect_save_candidates(appid: str, game_name: str,
         for path in local_candidates:
             _add(path, score_remotecache_candidate(path), "remotecache", accountid=entry.get("accountid", ""))
         if entry["remote_dir"]:
-            _add(entry["remote_dir"], 104 if has_local_candidates else 112, "steam-remote", accountid=entry.get("accountid", ""))
-        _add(entry["app_root"], 98, "steam-app-root", accountid=entry.get("accountid", ""))
-
-    # 5) Steam userdata/<uid>/<appid>/remote
-    for entry in remotecache_entries:
-        if entry["remote_dir"] and not entry.get("local_candidates"):
-            _add(entry["remote_dir"], 108, "steam-remote", accountid=entry.get("accountid", ""))
-        _add(entry["app_root"], 94, "steam-app-root", accountid=entry.get("accountid", ""))
+            # 如果已还原出真实本地路径，remote 目录只作低优先级备选
+            # 如果没有本地候选，remote 目录可能是 API 型游戏的真实存档位置
+            remote_score = 78 if has_local_candidates else 108
+            _add(entry["remote_dir"], remote_score, "steam-remote", accountid=entry.get("accountid", ""))
+        # app_root (含 remotecache.vdf 的目录) 仅作低优先级参考
+        _add(entry["app_root"], 68, "steam-app-root", accountid=entry.get("accountid", ""))
 
     # 6) 安装目录搜索
     for path in find_save_in_install_dir(install_dir):
@@ -3929,7 +4081,7 @@ class batch_config_save:
 
 
 def clear_startup_caches(cfg: Optional[dict] = None):
-    global _STEAM_AUTOCLOUD_CACHE, _APPINFO_LOADED, _APPINFO_DATA, _APPINFO_LOADED_PATH, _INSTALLED_GAME_INFO_CACHE
+    global _STEAM_AUTOCLOUD_CACHE, _APPINFO_LOADED, _APPINFO_DATA, _APPINFO_LOADED_PATH, _INSTALLED_GAME_INFO_CACHE, _APPINFO_TYPE_MAP
 
     _STEAM_AUTOCLOUD_CACHE = None
     with _STORAGE_KIND_CACHE_LOCK:
@@ -3943,6 +4095,7 @@ def clear_startup_caches(cfg: Optional[dict] = None):
     _APPINFO_LOADED = False
     _APPINFO_LOADED_PATH = ""
     _APPINFO_DATA = {}
+    _APPINFO_TYPE_MAP = {}
     with _INSTALLED_GAME_INFO_CACHE_LOCK:
         _INSTALLED_GAME_INFO_CACHE.clear()
     with _REGISTRY_INSTALL_CACHE_LOCK:
@@ -4069,8 +4222,9 @@ def send_desktop_notification(title: str, message: str):
         """使用 Windows Runtime Toast 通知 API（Windows 10+）"""
         try:
             import subprocess as _sp
-            t = title.replace("'", "''").replace('"', '&quot;').replace('<', '&lt;').replace('>', '&gt;')
-            m = message.replace("'", "''").replace('"', '&quot;').replace('<', '&lt;').replace('>', '&gt;').replace("\n", " ")
+            # & 转义必须在其他 XML 实体替换之前执行
+            t = title.replace('&', '&amp;').replace("'", "''").replace('"', '&quot;').replace('<', '&lt;').replace('>', '&gt;')
+            m = message.replace('&', '&amp;').replace("'", "''").replace('"', '&quot;').replace('<', '&lt;').replace('>', '&gt;').replace("\n", " ")
             ps = (
                 "[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null; "
                 "[Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom, ContentType = WindowsRuntime] | Out-Null; "
@@ -4110,7 +4264,7 @@ def send_desktop_notification(title: str, message: str):
                 "$n.Visible = $true; "
                 "$n.ShowBalloonTip(5000); "
                 "$end = (Get-Date).AddSeconds(6); "
-                "while ((Get-Date) -lt $end)  [System.Windows.Forms.Application]::DoEvents(); Start-Sleep -Milliseconds 100 ; "
+                "while ((Get-Date) -lt $end) { [System.Windows.Forms.Application]::DoEvents(); Start-Sleep -Milliseconds 100 }; "
                 "$n.Dispose()"
             )
             _sp.Popen(
