@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Steam 游戏存档备份管理器 v1.4.2 — 通用版"""
+"""Steam 游戏存档备份管理器 v1.4.3 — 通用版"""
 
 import os
 import sys
@@ -101,7 +101,7 @@ except ImportError as exc:
 # ══════════════════════════════════════════════
 
 APP_NAME = "Steam Save Manager"
-VERSION = "1.4.2"
+VERSION = "1.4.3"
 APP_DIR = Path(os.path.dirname(os.path.abspath(sys.argv[0])))
 LEGACY_CONFIG_DIR = Path.home() / ".steam_save_manager"
 STARTUP_AUTOSTART_FLAG = "--startup-launch"
@@ -284,6 +284,11 @@ TRANSLATIONS = {
         "max_backups_suffix": "个备份（0 = 不限）",
         "max_backup_size": "总备份大小上限",
         "max_backup_size_suffix": "GB（0 = 不限，超出自动删除最旧备份）",
+        "display_page_size": "列表显示数量",
+        "games_page_size": "游戏列表每页显示",
+        "games_page_size_suffix": "个游戏（5-200）",
+        "backup_page_size": "备份记录每页显示",
+        "backup_page_size_suffix": "条备份（5-200）",
         "backup_storage": "备份存储位置",
         "backup_storage_placeholder": "当前软件目录/backups（留空使用默认路径）",
         "current_path": "当前路径：{path}",
@@ -402,6 +407,11 @@ TRANSLATIONS = {
         "max_backups_suffix": "backups per game (0 = unlimited)",
         "max_backup_size": "Maximum total backup size",
         "max_backup_size_suffix": "GB (0 = unlimited, oldest backups are removed first)",
+        "display_page_size": "List Page Size",
+        "games_page_size": "Games per page",
+        "games_page_size_suffix": "games (5-200)",
+        "backup_page_size": "Backup records per page",
+        "backup_page_size_suffix": "records (5-200)",
         "backup_storage": "Backup Storage Path",
         "backup_storage_placeholder": "Uses the app folder /backups when left empty",
         "current_path": "Current path: {path}",
@@ -426,6 +436,14 @@ def normalize_language(code: str) -> str:
     if code.startswith("en"):
         return "en"
     return "en"
+
+
+def clamp_int(value, default: int, min_value: int, max_value: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = default
+    return max(min_value, min(max_value, parsed))
 
 
 def detect_system_language() -> str:
@@ -3933,6 +3951,8 @@ def load_config() -> dict:
         "webdav_verify_ssl": True,
         "max_backups_per_game": 20,
         "max_backup_size_gb": 10.0,
+        "games_page_size": 25,
+        "backup_page_size": 30,
         "backup_path": "",
     }
     if CONFIG_FILE.exists():
@@ -6514,7 +6534,12 @@ def _plan_backup_restore_entries(zf: zipfile.ZipFile, target_specs: list[dict]) 
         rel = match.group(2)
         if idx < 0 or not rel:
             continue
-        target_idx = idx if idx < len(target_specs) else 0
+        if idx >= len(target_specs):
+            raise RuntimeError(
+                "Restore target is missing save path groups required by this backup. "
+                "Please restore after reconfiguring the game's save paths."
+            )
+        target_idx = idx
         spec = target_specs[target_idx]
         entries.append((target_idx, spec, member, _zip_safe_restore_path(Path(spec["base"]), rel)))
     return entries
@@ -6577,7 +6602,7 @@ def restore_backup(zip_path: str, target_dir):
             raise RuntimeError(f"Restore failed and the previous save was restored: {restore_error}") from restore_error
 
 
-def get_backups(game_ref) -> list:
+def _get_backup_candidate_dirs(game_ref) -> list[Path]:
     if isinstance(game_ref, dict):
         candidate_dirs = [BACKUP_ROOT / get_game_storage_key(game_ref)]
         if not get_game_uid(game_ref):
@@ -6586,6 +6611,26 @@ def get_backups(game_ref) -> list:
                 candidate_dirs.append(legacy_dir)
     else:
         candidate_dirs = [BACKUP_ROOT / get_game_storage_key(str(game_ref or ""))]
+    return candidate_dirs
+
+
+def count_backups(game_ref) -> int:
+    count = 0
+    seen_paths = set()
+    for game_dir in _get_backup_candidate_dirs(game_ref):
+        if not game_dir.exists():
+            continue
+        for f in game_dir.glob("*.zip"):
+            norm = os.path.normcase(str(f))
+            if norm in seen_paths:
+                continue
+            seen_paths.add(norm)
+            count += 1
+    return count
+
+
+def get_backups(game_ref, limit: Optional[int] = None) -> list:
+    candidate_dirs = _get_backup_candidate_dirs(game_ref)
     backups = []
     seen_paths = set()
     for game_dir in candidate_dirs:
@@ -6610,7 +6655,11 @@ def get_backups(game_ref) -> list:
                 "game_uid": meta.get("game_uid", ""),
                 "storage_key": meta.get("storage_key", ""),
             })
+            if limit is not None and len(backups) >= limit:
+                break
     backups.sort(key=lambda item: str(item.get("timestamp", "")), reverse=True)
+    if limit is not None:
+        backups = backups[:max(0, int(limit))]
     return backups
 
 
@@ -7539,6 +7588,8 @@ BTN_DANGER     = "#ef4444"   # red
 BTN_DANGER_H   = "#dc2626"
 BTN_BLUE       = "#3b82f6"
 BTN_BLUE_H     = "#2563eb"
+BTN_SECONDARY  = ("#e2e8f0", "#303247")
+BTN_SECONDARY_H = ("#cbd5e1", "#3f4158")
 
 
 # ══════════════════════════════════════════════
@@ -7569,7 +7620,7 @@ class SteamSaveManager(ctk.CTk):
         self._about_dialog = None
         self._sidebar_version_label = None
         self._sidebar_version_text = f"v{VERSION}"
-        self._sidebar_version_color = ("#cbd5e1", "#3f3f46")
+        self._sidebar_version_color = ("#64748b", "#71717a")
         self._update_manifest_cache: Optional[dict] = None
         self._scan_results: list[dict] = []
         self._scan_lib_folders: list[str] = []
@@ -7581,16 +7632,26 @@ class SteamSaveManager(ctk.CTk):
         self._scan_empty_label = None
         self._scan_search_job = None
         self._games_search_job = None
+        self._games_page = 0
+        self._games_page_size = clamp_int(self.cfg.get("games_page_size", 25), 25, 5, 200)
         self._game_backup_count_cache: dict[str, int] = {}
         self._game_backups_cache: dict[str, list] = {}
         self._recent_backups_cache: dict[int, list] = {}
         self._game_detail_metrics_cache: dict[str, dict] = {}
         self._game_cards: dict[str, dict] = {}
         self._games_empty_label = None
+        self._games_page_label = None
+        self._games_prev_btn = None
+        self._games_next_btn = None
         self._home_recent_rows: dict[str, dict] = {}
         self._home_recent_empty_label = None
+        self._backup_page = 0
+        self._backup_page_size = clamp_int(self.cfg.get("backup_page_size", 30), 30, 5, 200)
         self._backup_rows: dict[str, dict] = {}
         self._backup_empty_label = None
+        self._backup_page_label = None
+        self._backup_prev_btn = None
+        self._backup_next_btn = None
         self._scan_in_progress = False
         self._scan_worker_count = 0
         self._scan_storage_profile = "unknown"
@@ -8135,10 +8196,10 @@ class SteamSaveManager(ctk.CTk):
         stats.grid_columnconfigure((0, 1, 2, 3), weight=1)
         self._stat_cards = {}
         defs = [
-            ("games",   self.t("stat_games"),   self.t("value_games", count=0), "#eef2ff", "#1e1b4b", "#6366f1"),
-            ("backups", self.t("stat_backups"), self.t("value_backups", count=0), "#ecfdf5", "#022c22", "#10b981"),
-            ("auto",    self.t("stat_auto"),    self.t("switch_off"),  "#fff7ed", "#431407", "#f97316"),
-            ("watch",   self.t("stat_watch"),   self.t("switch_off"),  "#fdf2f8", "#500724", "#ec4899"),
+            ("games",   self.t("stat_games"),   self.t("value_games", count=0), "#eef2ff", "#2e2b6b", "#6366f1"),
+            ("backups", self.t("stat_backups"), self.t("value_backups", count=0), "#ecfdf5", "#0c4535", "#10b981"),
+            ("auto",    self.t("stat_auto"),    self.t("switch_off"),  "#fff7ed", "#5e1e0c", "#f97316"),
+            ("watch",   self.t("stat_watch"),   self.t("switch_off"),  "#fdf2f8", "#6f0f33", "#ec4899"),
         ]
         for col, (key, title, default, lbg, dbg, accent) in enumerate(defs):
             card = ctk.CTkFrame(stats, fg_color=(lbg, dbg), corner_radius=12)
@@ -8153,7 +8214,7 @@ class SteamSaveManager(ctk.CTk):
 
         # 按钮
         bf = ctk.CTkFrame(frame, fg_color="transparent")
-        bf.grid(row=3, column=0, padx=32, pady=(16, 4), sticky="w")
+        bf.grid(row=3, column=0, padx=32, pady=(16, 8), sticky="w")
         ctk.CTkButton(bf, text=self.t("home_backup_all"), width=170, height=42,
                       font=font(13, "bold"), corner_radius=10,
                       fg_color=BTN_SUCCESS, hover_color=BTN_SUCCESS_H,
@@ -8167,13 +8228,13 @@ class SteamSaveManager(ctk.CTk):
                       font=font(13, "bold"), corner_radius=10,
                       fg_color=BTN_PRIMARY, hover_color=BTN_PRIMARY_H,
                       command=lambda: self._show_frame("scan")).grid(
-            row=0, column=1)
+            row=0, column=1, padx=(10, 10))
 
         # 最近备份
         self._home_recent = ctk.CTkScrollableFrame(
             frame, label_text=self.t("home_recent"), label_font=font(15, "bold"),
             height=260, corner_radius=12, fg_color=C_CARD_BG)
-        self._home_recent.grid(row=4, column=0, padx=30, pady=(14, 24), sticky="nsew")
+        self._home_recent.grid(row=4, column=0, padx=30, pady=(18, 24), sticky="nsew")
         frame.grid_rowconfigure(4, weight=1)
         self._home_recent_rows = {}
         self._home_recent_empty_label = ctk.CTkLabel(
@@ -8278,7 +8339,7 @@ class SteamSaveManager(ctk.CTk):
         frame.grid_rowconfigure(3, weight=1)
         self._scan_cards = {}
         self._scan_info_banner = ctk.CTkFrame(
-            self._scan_scroll, fg_color=("#eef2ff", "#1e1b4b"), corner_radius=10
+            self._scan_scroll, fg_color=("#eef2ff", "#2e2b6b"), corner_radius=12
         )
         self._scan_info_label = ctk.CTkLabel(
             self._scan_info_banner, text="", font=font(11), justify="left", text_color=C_BODY_TEXT
@@ -8417,6 +8478,7 @@ class SteamSaveManager(ctk.CTk):
         return mapping.get(selected_value, selected_value)
 
     def _schedule_games_refresh(self, *_args):
+        self._games_page = 0
         if self._games_search_job:
             try:
                 self.after_cancel(self._games_search_job)
@@ -8464,7 +8526,7 @@ class SteamSaveManager(ctk.CTk):
         key = get_game_cache_key(game_ref)
         if key in self._game_backup_count_cache:
             return self._game_backup_count_cache[key]
-        count = len(self._get_game_backups_cached(game_ref))
+        count = count_backups(game_ref)
         self._game_backup_count_cache[key] = count
         return count
 
@@ -8483,7 +8545,7 @@ class SteamSaveManager(ctk.CTk):
             return [dict(item) for item in cached]
         all_b = []
         for g in self.cfg.get("games", []):
-            for b in self._get_game_backups_cached(g):
+            for b in get_backups(g, limit=limit):
                 item = dict(b)
                 item["game"] = g["name"]
                 all_b.append(item)
@@ -8491,6 +8553,31 @@ class SteamSaveManager(ctk.CTk):
         recent = all_b[:limit]
         self._recent_backups_cache[limit] = [dict(item) for item in recent]
         return [dict(item) for item in recent]
+
+    def _clamp_page(self, page: int, total: int, page_size: int) -> int:
+        if total <= 0:
+            return 0
+        max_page = max(0, (total - 1) // max(1, page_size))
+        return max(0, min(page, max_page))
+
+    def _page_range(self, page: int, total: int, page_size: int) -> tuple[int, int, int]:
+        page_size = max(1, page_size)
+        page = self._clamp_page(page, total, page_size)
+        start = page * page_size
+        end = min(total, start + page_size)
+        return page, start, end
+
+    def _on_games_page_delta(self, delta: int):
+        self._games_page += delta
+        self._refresh_games_list()
+
+    def _on_backup_page_delta(self, delta: int):
+        self._backup_page += delta
+        self._refresh_backup_list()
+
+    def _on_backup_filter_changed(self):
+        self._backup_page = 0
+        self._refresh_backup_list()
 
     def _get_game_detail_metrics_cached(self, game: dict) -> dict:
         key = get_game_cache_key(game)
@@ -8600,7 +8687,7 @@ class SteamSaveManager(ctk.CTk):
             item = self._scan_cards.get(key)
             if item is None:
                 card = ctk.CTkFrame(self._scan_scroll,
-                                    fg_color=("#f1f5f9", "#252640"), corner_radius=10)
+                                    fg_color=("#f1f5f9", "#252640"), corner_radius=12)
                 card.grid_columnconfigure(1, weight=1)
                 title = ctk.CTkLabel(card, text="", font=font(13, "bold"),
                                      text_color=C_BODY_TEXT)
@@ -9085,6 +9172,25 @@ class SteamSaveManager(ctk.CTk):
             text_color=C_SUBTLE_TEXT,
             font=font(13),
         )
+        pager = ctk.CTkFrame(frame, fg_color="transparent")
+        pager.grid(row=3, column=0, padx=30, pady=(2, 14), sticky="ew")
+        pager.grid_columnconfigure(0, weight=1)
+        self._games_page_label = ctk.CTkLabel(
+            pager, text="", text_color=C_SUBTLE_TEXT, font=font(12)
+        )
+        self._games_page_label.grid(row=0, column=0, sticky="w")
+        self._games_prev_btn = ctk.CTkButton(
+            pager, text=self.bi("上一页", "Prev"), width=76, height=30,
+            font=font(12), corner_radius=6,
+            fg_color=BTN_SECONDARY, hover_color=BTN_SECONDARY_H,
+            command=lambda: self._on_games_page_delta(-1))
+        self._games_prev_btn.grid(row=0, column=1, padx=(8, 4), sticky="e")
+        self._games_next_btn = ctk.CTkButton(
+            pager, text=self.bi("下一页", "Next"), width=76, height=30,
+            font=font(12), corner_radius=6,
+            fg_color=BTN_SECONDARY, hover_color=BTN_SECONDARY_H,
+            command=lambda: self._on_games_page_delta(1))
+        self._games_next_btn.grid(row=0, column=2, padx=(4, 0), sticky="e")
 
     def _refresh_games_list(self):
         games = self.cfg.get("games", [])
@@ -9100,6 +9206,12 @@ class SteamSaveManager(ctk.CTk):
                 )
             )
             self._games_empty_label.pack(pady=40)
+            if self._games_page_label:
+                self._games_page_label.configure(text=self.bi("0 个游戏", "0 games"))
+            if self._games_prev_btn:
+                self._games_prev_btn.configure(state="disabled")
+            if self._games_next_btn:
+                self._games_next_btn.configure(state="disabled")
             return
         filtered_games = []
         for idx, g in enumerate(games):
@@ -9111,7 +9223,28 @@ class SteamSaveManager(ctk.CTk):
                 continue
             filtered_games.append((idx, g))
 
-        for idx, g in filtered_games:
+        total_games = len(filtered_games)
+        self._games_page, start, end = self._page_range(
+            self._games_page, total_games, self._games_page_size
+        )
+        page_games = filtered_games[start:end]
+        total_pages = max(1, (total_games + self._games_page_size - 1) // self._games_page_size)
+        if self._games_page_label:
+            if total_games:
+                self._games_page_label.configure(
+                    text=self.bi(
+                        f"第 {self._games_page + 1}/{total_pages} 页 · 显示 {start + 1}-{end} / {total_games} 个游戏",
+                        f"Page {self._games_page + 1}/{total_pages} · Showing {start + 1}-{end} of {total_games} games",
+                    )
+                )
+            else:
+                self._games_page_label.configure(text=self.bi("0 个游戏", "0 games"))
+        if self._games_prev_btn:
+            self._games_prev_btn.configure(state="normal" if self._games_page > 0 else "disabled")
+        if self._games_next_btn:
+            self._games_next_btn.configure(state="normal" if end < total_games else "disabled")
+
+        for idx, g in page_games:
             key = get_game_cache_key(g)
             active_keys.add(key)
             item = self._game_cards.get(key)
@@ -9121,10 +9254,10 @@ class SteamSaveManager(ctk.CTk):
                 card.grid_columnconfigure(1, weight=1)
                 title = ctk.CTkLabel(card, text="", font=font(14, "bold"),
                                      text_color=C_BODY_TEXT)
-                title.grid(row=0, column=0, columnspan=2, padx=14, pady=(10, 2), sticky="w")
+                title.grid(row=0, column=0, columnspan=2, padx=14, pady=(10, 4), sticky="w")
                 path_label = ctk.CTkLabel(card, text="", font=font(11),
                                           text_color=C_SUBTLE_TEXT)
-                path_label.grid(row=1, column=0, columnspan=2, padx=14, pady=(0, 3), sticky="w")
+                path_label.grid(row=1, column=0, columnspan=2, padx=14, pady=(0, 4), sticky="w")
                 backup_label = ctk.CTkLabel(card, text="", font=font(11),
                                             text_color=C_SUBTLE_TEXT)
                 backup_label.grid(row=2, column=0, padx=14, pady=(0, 10), sticky="w")
@@ -9193,7 +9326,7 @@ class SteamSaveManager(ctk.CTk):
             if item:
                 item["card"].destroy()
 
-        if filtered_games:
+        if page_games:
             self._games_empty_label.pack_forget()
         else:
             self._games_empty_label.configure(
@@ -9523,10 +9656,14 @@ class SteamSaveManager(ctk.CTk):
 
     # ─── 游戏详情 ───
     def _build_game_detail_frame(self):
-        frame = ctk.CTkFrame(self, fg_color=C_MAIN_BG)
-        self._frames["game_detail"] = frame
+        outer = ctk.CTkFrame(self, fg_color=C_MAIN_BG)
+        self._frames["game_detail"] = outer
+        outer.grid_columnconfigure(0, weight=1)
+        outer.grid_rowconfigure(0, weight=1)
+        # 使用可滚动容器包裹所有内容，避免小屏幕内容溢出
+        frame = ctk.CTkScrollableFrame(outer, fg_color=C_MAIN_BG, corner_radius=0)
+        frame.grid(row=0, column=0, sticky="nsew")
         frame.grid_columnconfigure(0, weight=1)
-        # Row 6 不再需要 weight，空间留给上方卡片
 
         # Row 0: 标题栏（卡片式）
         hdr = ctk.CTkFrame(frame, fg_color=C_CARD_BG, corner_radius=14)
@@ -9547,14 +9684,14 @@ class SteamSaveManager(ctk.CTk):
 
         # Row 1: 统计卡片 (4 列)
         stats_frame = ctk.CTkFrame(frame, fg_color="transparent")
-        stats_frame.grid(row=1, column=0, padx=26, pady=(0, 8), sticky="ew")
+        stats_frame.grid(row=1, column=0, padx=28, pady=(0, 8), sticky="ew")
         stats_frame.grid_columnconfigure((0, 1, 2, 3), weight=1)
         self._detail_stats = {}
         stat_defs = [
-            ("appid", "🔖 AppID", "—", "#eef2ff", "#1e1b4b", "#6366f1"),
-            ("backups", self.bi("💾 备份数量", "💾 Backups"), "0", "#ecfdf5", "#022c22", "#10b981"),
-            ("size", self.bi("📦 备份大小", "📦 Backup Size"), "0 B", "#fff7ed", "#431407", "#f97316"),
-            ("files", self.bi("📄 存档文件", "📄 Save Files"), "—", "#fdf2f8", "#500724", "#ec4899"),
+            ("appid", "🔖 AppID", "—", "#eef2ff", "#2e2b6b", "#6366f1"),
+            ("backups", self.bi("💾 备份数量", "💾 Backups"), "0", "#ecfdf5", "#0c4535", "#10b981"),
+            ("size", self.bi("📦 备份大小", "📦 Backup Size"), "0 B", "#fff7ed", "#5e1e0c", "#f97316"),
+            ("files", self.bi("📄 存档文件", "📄 Save Files"), "—", "#fdf2f8", "#6f0f33", "#ec4899"),
         ]
         for col, (key, title, default, lbg, dbg, accent) in enumerate(stat_defs):
             sc = ctk.CTkFrame(stats_frame, fg_color=(lbg, dbg), corner_radius=12)
@@ -9576,7 +9713,7 @@ class SteamSaveManager(ctk.CTk):
             row=0, column=0, padx=(16, 8), pady=14, sticky="w")
         self._detail_path = ctk.CTkLabel(
             path_card, text="", font=font(12), text_color=C_BODY_TEXT,
-            wraplength=460, anchor="w", justify="left")
+            wraplength=520, anchor="w", justify="left")
         self._detail_path.grid(row=0, column=1, padx=(0, 8), pady=14, sticky="w")
         self._detail_open_btn = ctk.CTkButton(
             path_card, text=self.bi("打开", "Open"), width=56, height=28, font=font(11),
@@ -9623,7 +9760,7 @@ class SteamSaveManager(ctk.CTk):
         # 最近同步活动
         self._detail_sync_recent = ctk.CTkLabel(
             proc_card, text="", font=font(11), text_color=C_SUBTLE_TEXT,
-            anchor="w", justify="left", wraplength=600)
+            anchor="w", justify="left", wraplength=700)
         self._detail_sync_recent.grid(row=2, column=0, columnspan=4,
                                        padx=16, pady=(0, 14), sticky="w")
 
@@ -9728,7 +9865,7 @@ class SteamSaveManager(ctk.CTk):
              lambda: self._delete_game_from_detail(idx)),
         ]
         for i, (txt, clr, hclr, cmd) in enumerate(actions):
-            ctk.CTkButton(self._detail_btns, text=txt, height=36,
+            ctk.CTkButton(self._detail_btns, text=txt, height=36, width=100,
                           font=font(12, "bold"), corner_radius=8,
                           fg_color=clr, hover_color=hclr,
                           command=cmd).grid(row=0, column=i, padx=3, sticky="ew")
@@ -9789,7 +9926,7 @@ class SteamSaveManager(ctk.CTk):
         else:
             for b in backups:
                 row = ctk.CTkFrame(scroll, fg_color=("#f1f5f9", "#252640"),
-                                   corner_radius=10)
+                                   corner_radius=12)
                 row.pack(fill="x", padx=4, pady=3)
                 row.grid_columnconfigure(0, weight=1)
                 ctk.CTkLabel(row, text=f"🕐 {self._fmt_ts(b['timestamp'])}",
@@ -10761,7 +10898,7 @@ class SteamSaveManager(ctk.CTk):
         self._bk_var = ctk.StringVar(value=self.t("backup_all_games"))
         self._bk_filter = ctk.CTkOptionMenu(
             hdr, variable=self._bk_var, values=[self.t("backup_all_games")],
-            command=lambda _: self._refresh_backup_list(), width=200,
+            command=lambda _: self._on_backup_filter_changed(), width=200,
             font=font(12))
         self._bk_filter.grid(row=0, column=1, sticky="e")
 
@@ -10776,6 +10913,25 @@ class SteamSaveManager(ctk.CTk):
             text_color=C_SUBTLE_TEXT,
             font=font(13),
         )
+        pager = ctk.CTkFrame(frame, fg_color="transparent")
+        pager.grid(row=2, column=0, padx=30, pady=(0, 14), sticky="ew")
+        pager.grid_columnconfigure(0, weight=1)
+        self._backup_page_label = ctk.CTkLabel(
+            pager, text="", text_color=C_SUBTLE_TEXT, font=font(12)
+        )
+        self._backup_page_label.grid(row=0, column=0, sticky="w")
+        self._backup_prev_btn = ctk.CTkButton(
+            pager, text=self.bi("上一页", "Prev"), width=76, height=30,
+            font=font(12), corner_radius=6,
+            fg_color=BTN_SECONDARY, hover_color=BTN_SECONDARY_H,
+            command=lambda: self._on_backup_page_delta(-1))
+        self._backup_prev_btn.grid(row=0, column=1, padx=(8, 4), sticky="e")
+        self._backup_next_btn = ctk.CTkButton(
+            pager, text=self.bi("下一页", "Next"), width=76, height=30,
+            font=font(12), corner_radius=6,
+            fg_color=BTN_SECONDARY, hover_color=BTN_SECONDARY_H,
+            command=lambda: self._on_backup_page_delta(1))
+        self._backup_next_btn.grid(row=0, column=2, padx=(4, 0), sticky="e")
 
     def _refresh_backup_list(self):
         games = self.cfg.get("games", [])
@@ -10784,34 +10940,69 @@ class SteamSaveManager(ctk.CTk):
 
         sel = self._bk_var.get()
         targets = games if sel == all_games_label else [g for g in games if g["name"] == sel]
+        total_backups = sum(self._get_game_backup_count_cached(g) for g in targets)
+        self._backup_page, start, end = self._page_range(
+            self._backup_page, total_backups, self._backup_page_size
+        )
+        total_pages = max(1, (total_backups + self._backup_page_size - 1) // self._backup_page_size)
         all_b = []
         for item in self._backup_rows.values():
             item["card"].pack_forget()
-        for g in targets:
-            save_paths = get_game_save_paths(g, existing_only=False)
-            save_specs = get_game_save_specs(g, existing_only=False)
-            primary_path = save_paths[0] if save_paths else g.get("save_path", "")
-            for b in self._get_game_backups_cached(g):
-                b["game"] = g["name"]
-                b["save_path"] = primary_path
-                b["save_paths"] = save_paths
-                b["save_specs"] = save_specs
-                all_b.append(b)
-        all_b.sort(key=lambda x: x["timestamp"], reverse=True)
+        if total_backups:
+            for g in targets:
+                for b in get_backups(g, limit=end):
+                    b["game"] = g["name"]
+                    b["_game_ref"] = g
+                    all_b.append(b)
+            all_b.sort(key=lambda x: x["timestamp"], reverse=True)
+        page_backups = all_b[start:end]
 
-        if not all_b:
+        if self._backup_page_label:
+            if total_backups:
+                self._backup_page_label.configure(
+                    text=self.bi(
+                        f"第 {self._backup_page + 1}/{total_pages} 页 · 显示 {start + 1}-{end} / {total_backups} 条备份",
+                        f"Page {self._backup_page + 1}/{total_pages} · Showing {start + 1}-{end} of {total_backups} backups",
+                    )
+                )
+            else:
+                self._backup_page_label.configure(text=self.bi("0 条备份", "0 backups"))
+        if self._backup_prev_btn:
+            self._backup_prev_btn.configure(state="normal" if self._backup_page > 0 else "disabled")
+        if self._backup_next_btn:
+            self._backup_next_btn.configure(state="normal" if end < total_backups else "disabled")
+
+        if not page_backups:
             self._backup_empty_label.configure(text=self.t("backup_empty"))
             self._backup_empty_label.pack(pady=40)
+            stale_keys = list(self._backup_rows.keys())
+            for key in stale_keys:
+                item = self._backup_rows.pop(key, None)
+                if item:
+                    item["card"].destroy()
             return
         self._backup_empty_label.pack_forget()
         active_keys = set()
-        for b in all_b:
+        for b in page_backups:
+            game_ref = b.get("_game_ref", {})
+            if isinstance(game_ref, dict):
+                save_paths = get_game_save_paths(game_ref, existing_only=False)
+                save_specs = get_game_save_specs(game_ref, existing_only=False)
+                primary_path = save_paths[0] if save_paths else game_ref.get("save_path", "")
+            else:
+                save_paths = []
+                save_specs = []
+                primary_path = ""
+            b["game"] = game_ref.get("name", b.get("game", "")) if isinstance(game_ref, dict) else b.get("game", "")
+            b["save_path"] = primary_path
+            b["save_paths"] = save_paths
+            b["save_specs"] = save_specs
             key = f"{b['game']}::{b['timestamp']}::{b['filename']}"
             active_keys.add(key)
             item = self._backup_rows.get(key)
             if item is None:
                 card = ctk.CTkFrame(self._bk_scroll,
-                                    fg_color=("#f1f5f9", "#252640"), corner_radius=10)
+                                    fg_color=("#f1f5f9", "#252640"), corner_radius=12)
                 card.grid_columnconfigure(1, weight=1)
                 title = ctk.CTkLabel(card, text="", font=font(13, "bold"),
                                      text_color=C_BODY_TEXT)
@@ -11435,9 +11626,28 @@ class SteamSaveManager(ctk.CTk):
         self._bind_entry_apply(self._max_size_e, self._apply_max_backup_size)
         ctk.CTkLabel(rf2, text=self.t("max_backup_size_suffix"), font=font(12)).pack(side="left")
 
-        _label(system, 11, "backup_storage")
+        _label(system, 11, "display_page_size")
+        pf = _row(system)
+        pf.grid(row=12, column=0, padx=22, sticky="w")
+        ctk.CTkLabel(pf, text=self.t("games_page_size"), font=font(12)).pack(side="left")
+        self._games_page_size_e = ctk.CTkEntry(pf, width=64, font=font(12))
+        self._games_page_size_e.insert(0, str(self._games_page_size))
+        self._games_page_size_e.pack(side="left", padx=6)
+        self._bind_entry_apply(self._games_page_size_e, self._apply_games_page_size)
+        ctk.CTkLabel(pf, text=self.t("games_page_size_suffix"), font=font(12)).pack(side="left")
+
+        pf2 = _row(system)
+        pf2.grid(row=13, column=0, padx=22, pady=(6, 0), sticky="w")
+        ctk.CTkLabel(pf2, text=self.t("backup_page_size"), font=font(12)).pack(side="left")
+        self._backup_page_size_e = ctk.CTkEntry(pf2, width=64, font=font(12))
+        self._backup_page_size_e.insert(0, str(self._backup_page_size))
+        self._backup_page_size_e.pack(side="left", padx=6)
+        self._bind_entry_apply(self._backup_page_size_e, self._apply_backup_page_size)
+        ctk.CTkLabel(pf2, text=self.t("backup_page_size_suffix"), font=font(12)).pack(side="left")
+
+        _label(system, 14, "backup_storage")
         bpf = _row(system)
-        bpf.grid(row=12, column=0, padx=22, sticky="ew")
+        bpf.grid(row=15, column=0, padx=22, sticky="ew")
         self._backup_path_e = ctk.CTkEntry(
             bpf, width=420, font=font(12),
             placeholder_text=self.t("backup_storage_placeholder"))
@@ -11450,13 +11660,13 @@ class SteamSaveManager(ctk.CTk):
             system, text=self.t("current_path", path=str(BACKUP_ROOT)),
             font=font(11), text_color=C_SUBTLE_TEXT)
         self._backup_current_path_label.grid(
-            row=13, column=0, padx=22, pady=(6, 18), sticky="w")
+            row=16, column=0, padx=22, pady=(6, 18), sticky="w")
         ctk.CTkButton(
             system, text=self.bi("关于软件", "About"),
             width=120, height=34, font=font(12, "bold"),
             corner_radius=8, fg_color=BTN_PRIMARY, hover_color=BTN_PRIMARY_H,
             command=self._show_about_dialog
-        ).grid(row=14, column=0, padx=22, pady=(0, 18), sticky="w")
+        ).grid(row=17, column=0, padx=22, pady=(0, 18), sticky="w")
 
 
 
@@ -11714,6 +11924,32 @@ class SteamSaveManager(ctk.CTk):
         self.cfg["max_backup_size_gb"] = value
         save_config(self.cfg)
         enforce_backup_limits()
+
+    def _apply_games_page_size(self):
+        value = clamp_int(self._games_page_size_e.get().strip(), self._games_page_size, 5, 200)
+        self._set_entry_value(self._games_page_size_e, value)
+        current_cfg = clamp_int(self.cfg.get("games_page_size", value), value, 5, 200)
+        if value == self._games_page_size and current_cfg == value:
+            return
+        self._games_page_size = value
+        self._games_page = 0
+        self.cfg["games_page_size"] = value
+        save_config(self.cfg)
+        if getattr(self, "_current_frame", "") == "games":
+            self._refresh_games_list()
+
+    def _apply_backup_page_size(self):
+        value = clamp_int(self._backup_page_size_e.get().strip(), self._backup_page_size, 5, 200)
+        self._set_entry_value(self._backup_page_size_e, value)
+        current_cfg = clamp_int(self.cfg.get("backup_page_size", value), value, 5, 200)
+        if value == self._backup_page_size and current_cfg == value:
+            return
+        self._backup_page_size = value
+        self._backup_page = 0
+        self.cfg["backup_page_size"] = value
+        save_config(self.cfg)
+        if getattr(self, "_current_frame", "") == "backup":
+            self._refresh_backup_list()
 
     def _apply_backup_path(self):
         old_backup_root = globals()["BACKUP_ROOT"]
