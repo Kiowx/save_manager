@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Steam 游戏存档备份管理器 v1.4.3 — 通用版"""
+"""Steam 游戏存档备份管理器 v1.4.4 — 通用版"""
 
 import os
 import sys
@@ -101,7 +101,7 @@ except ImportError as exc:
 # ══════════════════════════════════════════════
 
 APP_NAME = "Steam Save Manager"
-VERSION = "1.4.3"
+VERSION = "1.4.4"
 APP_DIR = Path(os.path.dirname(os.path.abspath(sys.argv[0])))
 LEGACY_CONFIG_DIR = Path.home() / ".steam_save_manager"
 STARTUP_AUTOSTART_FLAG = "--startup-launch"
@@ -154,6 +154,19 @@ def _join_thread(thread: Optional[threading.Thread], timeout: float = 1.0):
         thread.join(timeout=timeout)
 
 
+def _path_is_within(child: Path | str, parent: Path | str) -> bool:
+    try:
+        child_abs = os.path.normcase(os.path.abspath(str(child)))
+        parent_abs = os.path.normcase(os.path.abspath(str(parent)))
+        return os.path.commonpath([child_abs, parent_abs]) == parent_abs
+    except Exception:
+        return False
+
+
+def _config_batch_depth() -> int:
+    return int(getattr(_CONFIG_BATCH_STATE, "depth", 0) or 0)
+
+
 CONFIG_DIR = _resolve_config_dir()
 CONFIG_FILE = CONFIG_DIR / "config.json"
 BACKUP_ROOT = APP_DIR / "backups"
@@ -161,9 +174,12 @@ LOCK_FILE = CONFIG_DIR / ".lock"
 UPDATE_MANIFEST_URL = "https://raw.githubusercontent.com/Kiowx/save_manager/refs/heads/main/update/update.json"
 CONFIG_SAVE_LOCK = threading.Lock()
 SAVE_IO_LOCK = threading.RLock()
-_CONFIG_BATCH_DEPTH = 0
-_CONFIG_BATCH_DIRTY = False
-_CONFIG_BATCH_CFG_REF: Optional[dict] = None
+_CONFIG_BATCH_STATE = threading.local()
+
+ZIP_EXTRACT_MAX_FILES = 200_000
+ZIP_EXTRACT_MAX_MEMBER_BYTES = 10 * 1024 * 1024 * 1024
+ZIP_EXTRACT_MAX_TOTAL_BYTES = 20 * 1024 * 1024 * 1024
+RESTORE_SAFETY_KEEP_PER_TARGET = 3
 
 SUPPORTED_LANGUAGES = ("zh-CN", "en")
 LANGUAGE_NAMES = {
@@ -620,9 +636,27 @@ def _ps_quote(value: Path | str) -> str:
     return str(value).replace("'", "''")
 
 
+def _validate_windows_update_replacement_paths(downloaded_path: Path, current_path: Path):
+    src = Path(downloaded_path).resolve(strict=False)
+    dst = Path(current_path).resolve(strict=False)
+    update_root = get_update_download_dir().resolve(strict=False)
+    app_root = APP_DIR.resolve(strict=False)
+    if src == dst:
+        raise ValueError("Update source and target must be different files")
+    if src.suffix.lower() != ".exe" or dst.suffix.lower() != ".exe":
+        raise ValueError("Windows self-update can only replace executable files")
+    if not src.exists():
+        raise FileNotFoundError(f"Downloaded update does not exist: {src}")
+    if not _path_is_within(src, update_root):
+        raise ValueError(f"Downloaded update is outside the update directory: {src}")
+    if not _path_is_within(dst, app_root):
+        raise ValueError(f"Current executable is outside the application directory: {dst}")
+
+
 def _build_windows_replace_and_launch_command(downloaded_path: Path, current_path: Path, *,
                                               current_pid: int = 0,
                                               backup_old: bool = True) -> str:
+    _validate_windows_update_replacement_paths(downloaded_path, current_path)
     src = str(downloaded_path).replace("'", "''")
     dst = str(current_path).replace("'", "''")
     bak = str(current_path.with_suffix(current_path.suffix + ".old")).replace("'", "''")
@@ -4042,11 +4076,11 @@ def load_config() -> dict:
 
 
 def save_config(cfg: dict):
-    global _CONFIG_BATCH_DEPTH, _CONFIG_BATCH_DIRTY, _CONFIG_BATCH_CFG_REF
-    # 如果当前处于批量写入上下文，仅标记脏位，延迟实际写盘
-    if _CONFIG_BATCH_DEPTH > 0:
-        _CONFIG_BATCH_DIRTY = True
-        _CONFIG_BATCH_CFG_REF = cfg
+    # 如果当前线程处于批量写入上下文，仅标记脏位，延迟实际写盘。
+    # 使用 thread-local 状态，避免后台同步线程和 UI 线程互相吞掉保存。
+    if _config_batch_depth() > 0:
+        _CONFIG_BATCH_STATE.dirty = True
+        _CONFIG_BATCH_STATE.cfg_ref = cfg
         return
     _save_config_now(cfg)
 
@@ -4084,17 +4118,16 @@ class batch_config_save:
     """
 
     def __enter__(self):
-        global _CONFIG_BATCH_DEPTH
-        _CONFIG_BATCH_DEPTH += 1
+        _CONFIG_BATCH_STATE.depth = _config_batch_depth() + 1
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        global _CONFIG_BATCH_DEPTH, _CONFIG_BATCH_DIRTY, _CONFIG_BATCH_CFG_REF
-        _CONFIG_BATCH_DEPTH = max(0, _CONFIG_BATCH_DEPTH - 1)
-        if _CONFIG_BATCH_DEPTH == 0 and _CONFIG_BATCH_DIRTY:
-            cfg_ref = _CONFIG_BATCH_CFG_REF
-            _CONFIG_BATCH_DIRTY = False
-            _CONFIG_BATCH_CFG_REF = None
+        depth = max(0, _config_batch_depth() - 1)
+        _CONFIG_BATCH_STATE.depth = depth
+        if depth == 0 and bool(getattr(_CONFIG_BATCH_STATE, "dirty", False)):
+            cfg_ref = getattr(_CONFIG_BATCH_STATE, "cfg_ref", None)
+            _CONFIG_BATCH_STATE.dirty = False
+            _CONFIG_BATCH_STATE.cfg_ref = None
             if cfg_ref is not None:
                 _save_config_now(cfg_ref)
         return False  # 不抑制异常
@@ -4366,6 +4399,29 @@ def validate_zip_archive(zip_path: Path | str) -> tuple[bool, str]:
         return True, ""
     except Exception as e:
         return False, f"{type(e).__name__}: {e}"
+
+
+def _validate_zip_extract_limits(zf: zipfile.ZipFile, context: str = "archive"):
+    file_count = 0
+    total_size = 0
+    for info in zf.infolist():
+        if not info.filename or info.is_dir() or _is_ignored_save_payload_file(info.filename):
+            continue
+        file_count += 1
+        if file_count > ZIP_EXTRACT_MAX_FILES:
+            raise ValueError(
+                f"{context} contains too many files: {file_count} > {ZIP_EXTRACT_MAX_FILES}"
+            )
+        member_size = max(0, int(info.file_size or 0))
+        if member_size > ZIP_EXTRACT_MAX_MEMBER_BYTES:
+            raise ValueError(
+                f"{context} member is too large: {info.filename} ({member_size} bytes)"
+            )
+        total_size += member_size
+        if total_size > ZIP_EXTRACT_MAX_TOTAL_BYTES:
+            raise ValueError(
+                f"{context} expands to too much data: {total_size} > {ZIP_EXTRACT_MAX_TOTAL_BYTES}"
+            )
 
 
 def enforce_sync_archive_limits(sync_game_dir: Path, keep_count: int = 3):
@@ -4703,6 +4759,7 @@ def extract_sync_archive(archive_path: Path, target_specs_or_paths):
     try:
         extracted_count = 0
         with zipfile.ZipFile(archive_path, "r") as archive:
+            _validate_zip_extract_limits(archive, "sync archive")
             for info in archive.infolist():
                 if not info.filename:
                     continue
@@ -6496,6 +6553,34 @@ def _restore_safety_dir(target: Path) -> Path:
     return candidate
 
 
+def _cleanup_old_restore_safety_dirs(target: Path, keep: int = RESTORE_SAFETY_KEEP_PER_TARGET):
+    if keep <= 0:
+        keep = 0
+    parent = target.parent
+    prefix = f"{target.name}_pre_restore_"
+    try:
+        candidates = [
+            item for item in parent.iterdir()
+            if item.is_dir() and item.name.startswith(prefix)
+        ]
+    except Exception as e:
+        logger.debug("无法枚举还原安全备份目录 %s: %s", parent, e)
+        return
+    def _safe_mtime(item: Path) -> float:
+        try:
+            return item.stat().st_mtime
+        except Exception:
+            return 0.0
+
+    candidates.sort(key=_safe_mtime, reverse=True)
+    for item in candidates[keep:]:
+        try:
+            if _path_is_within(item, parent):
+                shutil.rmtree(item)
+        except Exception as e:
+            logger.debug("清理旧还原安全备份目录失败 %s: %s", item, e)
+
+
 def _zip_safe_restore_path(base_dir: Path, relative_name: str) -> Path:
     normalized = (relative_name or "").replace("\\", "/")
     rel_path = PurePosixPath(normalized)
@@ -6556,6 +6641,7 @@ def restore_backup(zip_path: str, target_dir):
         return
 
     with zipfile.ZipFile(zip_path, "r") as zf:
+        _validate_zip_extract_limits(zf, "backup archive")
         restore_entries = _plan_backup_restore_entries(zf, target_specs)
         if not restore_entries:
             return
@@ -6584,6 +6670,8 @@ def restore_backup(zip_path: str, target_dir):
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 with zf.open(member) as src, open(dest, "wb") as dst:
                     shutil.copyfileobj(src, dst)
+            for target, _, _ in restore_records.values():
+                _cleanup_old_restore_safety_dirs(target)
         except Exception as restore_error:
             rollback_errors = []
             for target, safety_dir, existed_before in restore_records.values():
