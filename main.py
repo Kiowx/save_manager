@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Steam 游戏存档备份管理器 v1.4.4 — 通用版"""
+"""Steam 游戏存档备份管理器 v1.4.5 — 通用版"""
 
 import os
 import sys
@@ -101,7 +101,7 @@ except ImportError as exc:
 # ══════════════════════════════════════════════
 
 APP_NAME = "Steam Save Manager"
-VERSION = "1.4.4"
+VERSION = "1.4.5"
 APP_DIR = Path(os.path.dirname(os.path.abspath(sys.argv[0])))
 LEGACY_CONFIG_DIR = Path.home() / ".steam_save_manager"
 STARTUP_AUTOSTART_FLAG = "--startup-launch"
@@ -4366,9 +4366,131 @@ def send_desktop_notification(title: str, message: str):
             _try_pystray()
 
 
+def get_game_sync_folder_key(game_ref) -> str:
+    """跨设备稳定的同步目录名，不带本机生成的 game_uid 后缀。"""
+    appid = ""
+    if isinstance(game_ref, dict):
+        name = str(game_ref.get("name", "") or "").strip()
+        appid = str(game_ref.get("appid", "") or "").strip()
+    else:
+        name = str(game_ref or "").strip()
+    appid_key = re.sub(r"[^A-Za-z0-9._-]+", "_", appid).strip("._-")
+    if appid_key:
+        return f"appid_{appid_key}"
+    key = sanitize(name).strip()
+    if key:
+        return key
+    return "game"
+
+
+def get_game_legacy_name_sync_folder_key(game_ref) -> str:
+    if isinstance(game_ref, dict):
+        name = str(game_ref.get("name", "") or "").strip()
+    else:
+        name = str(game_ref or "").strip()
+    return sanitize(name).strip() or "game"
+
+
 def get_sync_game_dir(sync_folder: str, game_ref) -> Path:
-    """获取同步目标中该游戏的子文件夹"""
-    return Path(sync_folder) / "SteamSaveSync" / get_game_storage_key(game_ref)
+    """获取同步目标中该游戏的跨设备共享子文件夹"""
+    return Path(sync_folder) / "SteamSaveSync" / get_game_sync_folder_key(game_ref)
+
+
+def _is_legacy_device_sync_key(shared_key: str, candidate_key: str) -> bool:
+    shared = str(shared_key or "").strip()
+    candidate = str(candidate_key or "").strip()
+    if not shared or not candidate:
+        return False
+    suffixes = []
+    for prefix in (shared, _webdav_safe_segment(shared)):
+        if prefix and candidate.startswith(f"{prefix}__"):
+            suffixes.append(candidate[len(prefix) + 2:])
+    return any(re.fullmatch(r"[0-9a-fA-F]{8}", suffix or "") for suffix in suffixes)
+
+
+def _legacy_sync_name_prefixes(game_ref) -> list[str]:
+    prefixes = []
+    legacy_name_key = get_game_legacy_name_sync_folder_key(game_ref)
+    for key in (legacy_name_key,):
+        if key and key not in prefixes:
+            prefixes.append(key)
+    safe_legacy_name_key = _webdav_safe_segment(legacy_name_key)
+    if safe_legacy_name_key and (safe_legacy_name_key == legacy_name_key or len(safe_legacy_name_key) >= 4):
+        if safe_legacy_name_key not in prefixes:
+            prefixes.append(safe_legacy_name_key)
+    storage_key = get_game_storage_key(game_ref)
+    for key in (storage_key, _webdav_safe_segment(storage_key)):
+        raw = str(key or "").strip()
+        match = re.fullmatch(r"(.+)__([0-9a-fA-F]{8})", raw)
+        if match:
+            prefix = match.group(1)
+            if prefix and prefix not in prefixes:
+                prefixes.append(prefix)
+    return prefixes
+
+
+def get_legacy_sync_game_dirs(sync_folder: str, game_ref) -> list[Path]:
+    root = Path(sync_folder) / "SteamSaveSync"
+    shared_dir = get_sync_game_dir(sync_folder, game_ref)
+    candidates = []
+    shared_key = get_game_sync_folder_key(game_ref)
+    name_prefixes = _legacy_sync_name_prefixes(game_ref)
+    keys = []
+    for key in (get_game_storage_key(game_ref), _webdav_safe_segment(get_game_storage_key(game_ref))):
+        if any(_is_legacy_device_sync_key(prefix, key) for prefix in name_prefixes):
+            keys.append(key)
+    for key in name_prefixes:
+        if key and key != shared_key:
+            keys.append(key)
+    try:
+        if root.is_dir() and name_prefixes:
+            for item in root.iterdir():
+                if item.is_dir() and any(_is_legacy_device_sync_key(prefix, item.name) for prefix in name_prefixes):
+                    keys.append(item.name)
+    except Exception as e:
+        logger.debug("扫描旧同步目录失败 %s: %s", root, e)
+    for key in keys:
+        if not key:
+            continue
+        legacy_dir = root / key
+        try:
+            if legacy_dir.resolve(strict=False) == shared_dir.resolve(strict=False):
+                continue
+        except Exception:
+            if os.path.normcase(os.path.normpath(str(legacy_dir))) == os.path.normcase(os.path.normpath(str(shared_dir))):
+                continue
+        if legacy_dir not in candidates:
+            candidates.append(legacy_dir)
+    return candidates
+
+
+def _merge_sync_game_dir_contents(src: Path, dst: Path):
+    if not src.is_dir():
+        return
+    dst.mkdir(parents=True, exist_ok=True)
+    for root, dirs, files in os.walk(src):
+        rel = os.path.relpath(root, src)
+        target_dir = dst if rel == "." else dst / rel
+        target_dir.mkdir(parents=True, exist_ok=True)
+        for dir_name in dirs:
+            (target_dir / dir_name).mkdir(parents=True, exist_ok=True)
+        for file_name in files:
+            src_file = Path(root) / file_name
+            dst_file = target_dir / file_name
+            try:
+                if dst_file.exists() and dst_file.stat().st_mtime >= src_file.stat().st_mtime:
+                    continue
+                shutil.copy2(src_file, dst_file)
+            except Exception as e:
+                logger.debug("迁移旧同步目录文件失败 %s -> %s: %s", src_file, dst_file, e)
+
+
+def ensure_shared_sync_game_dir(sync_folder: str, game_ref) -> Path:
+    shared_dir = get_sync_game_dir(sync_folder, game_ref)
+    for legacy_dir in get_legacy_sync_game_dirs(sync_folder, game_ref):
+        if legacy_dir.exists():
+            _merge_sync_game_dir_contents(legacy_dir, shared_dir)
+    return shared_dir
 
 
 def get_sync_archive_root(sync_game_dir: Path) -> Path:
@@ -4888,22 +5010,20 @@ def _webdav_safe_segment(value: str) -> str:
 
 
 def _webdav_legacy_game_dir_key(game_ref) -> str:
-    if isinstance(game_ref, dict):
-        name = str(game_ref.get("name", "") or "").strip()
-    else:
-        name = str(game_ref or "").strip()
-    return sanitize(name).strip() or "game"
+    return get_game_legacy_name_sync_folder_key(game_ref)
 
 
 def _webdav_remote_archive_dirs(cfg: Optional[dict], game_ref) -> list[str]:
     base_path = _webdav_base_path(cfg)
     storage_key = get_game_storage_key(game_ref)
     candidates = []
-    for key in (
-        _webdav_legacy_game_dir_key(game_ref),
-        str(storage_key or "").strip(),
-        _webdav_safe_segment(storage_key),
-    ):
+    keys = [get_game_sync_folder_key(game_ref)]
+    for key in _legacy_sync_name_prefixes(game_ref):
+        keys.append(key)
+    for key in (str(storage_key or "").strip(), _webdav_safe_segment(storage_key)):
+        if any(_is_legacy_device_sync_key(prefix, key) for prefix in _legacy_sync_name_prefixes(game_ref)):
+            keys.append(key)
+    for key in keys:
         if not key:
             continue
         remote_dir = f"{base_path}/{key}/archives"
@@ -4912,16 +5032,45 @@ def _webdav_remote_archive_dirs(cfg: Optional[dict], game_ref) -> list[str]:
     return candidates or [f"{base_path}/game/archives"]
 
 
+def _webdav_discover_legacy_remote_archive_dirs(client, cfg: Optional[dict], game_ref) -> list[str]:
+    name_prefixes = _legacy_sync_name_prefixes(game_ref)
+    if not name_prefixes:
+        return []
+    base_path = _webdav_base_path(cfg)
+    try:
+        existing_base = _webdav_find_existing_variant(client, base_path)
+        items = client.list(existing_base)
+    except Exception as e:
+        logger.debug("扫描 WebDAV 旧同步目录失败 %s: %s", base_path, e)
+        return []
+    result = []
+    for item in items:
+        name = str(item or "").strip("/").rsplit("/", 1)[-1]
+        if not any(_is_legacy_device_sync_key(prefix, name) for prefix in name_prefixes):
+            continue
+        remote_dir = f"{existing_base.rstrip('/')}/{name}/archives"
+        if remote_dir not in result:
+            result.append(remote_dir)
+    return result
+
+
+def _webdav_archive_dirs_for_lookup(client, cfg: Optional[dict], game_ref) -> list[str]:
+    dirs = list(_webdav_remote_archive_dirs(cfg, game_ref))
+    for remote_dir in _webdav_discover_legacy_remote_archive_dirs(client, cfg, game_ref):
+        if remote_dir not in dirs:
+            dirs.append(remote_dir)
+    return dirs
+
+
 def _webdav_preferred_archive_dir(client, cfg: Optional[dict], game_ref) -> str:
     candidates = _webdav_remote_archive_dirs(cfg, game_ref)
     if not candidates:
         return f"{_webdav_base_path(cfg)}/game/archives"
-    for candidate in candidates:
-        try:
-            return _webdav_find_existing_variant(client, candidate)
-        except Exception:
-            continue
-    return candidates[0]
+    shared_dir = candidates[0]
+    try:
+        return _webdav_find_existing_variant(client, shared_dir)
+    except Exception:
+        return shared_dir
 
 
 def _webdav_normalize_url(url: str, preset: str = "generic", username: str = "") -> str:
@@ -5115,7 +5264,7 @@ def _webdav_list_archive_entries(client, cfg: dict, game_ref, strict: bool = Fal
     entries = []
     seen = set()
     errors = []
-    for remote_dir in _webdav_remote_archive_dirs(cfg, game_ref):
+    for remote_dir in _webdav_archive_dirs_for_lookup(client, cfg, game_ref):
         try:
             existing_dir = _webdav_find_existing_variant(client, remote_dir)
         except FileNotFoundError:
@@ -5973,7 +6122,7 @@ def _sync_game_save_impl(game: dict, sync_folder: str, mode: str = "smart",
             "Skipped: neither a sync folder nor WebDAV is available",
         )
 
-    dest_dir = get_sync_game_dir(effective_sync_root, game)
+    dest_dir = ensure_shared_sync_game_dir(effective_sync_root, game)
     dest_dir.mkdir(parents=True, exist_ok=True)
     webdav_active = bool(cfg and cfg.get("webdav_enabled"))
     webdav_cache_root = (CONFIG_DIR / "webdav_sync_cache")
@@ -6788,7 +6937,7 @@ def delete_linked_sync_archive(cfg: Optional[dict], game_ref, archive_name: str)
         client = _webdav_make_client(cfg)
         if client:
             deleted = False
-            for remote_dir in _webdav_remote_archive_dirs(cfg, game_ref):
+            for remote_dir in _webdav_archive_dirs_for_lookup(client, cfg, game_ref):
                 try:
                     _webdav_clean_with_variants(client, f"{remote_dir.rstrip('/')}/{archive_name}")
                     deleted = True
@@ -6868,7 +7017,7 @@ class GameProcessMonitor:
             f"{len(save_paths)} local folders",
         )
         local_info = snapshot_sync_specs(save_specs, local_label)
-        dest_dir = get_sync_game_dir(sync_folder, game)
+        dest_dir = ensure_shared_sync_game_dir(sync_folder, game)
         remote_payload = get_remote_sync_payload(dest_dir, len(save_paths))
         if remote_payload:
             if remote_payload.get("kind") == "archive":
