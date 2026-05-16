@@ -1,6 +1,6 @@
 {
-  "sha256": "5b2b6db304bb29b78380c0318c2b2aafb436c764068a4410de5aa3b1242e571f",
-  "version": "1.4.5",
-  "notes": "1. 将云同步目录命名改为基于稳定 AppID，避免同名游戏共用同一个云存档目录导致串档\n2. 确保同一款游戏在不同设备上即使显示名称不同，也会共享同一个同步目录\n3. 保留旧版本同步目录兼容，包括旧的游戏名目录和旧的设备后缀目录，例如 游戏名__11b1231b\n4. 将旧设备后缀识别限制为严格的 8 位十六进制后缀，避免误合并 游戏名__Deluxe 等无关目录\n5. 增加 WebDAV 旧目录发现能力，可以识别其他设备曾上传的旧后缀目录并纳入同步读取\n6. 调整 WebDAV 同步查找逻辑：优先使用新的 AppID 目录，同时兼容读取旧目录\n7. 本地备份目录仍保留原有独立身份，不受云同步目录改动影响",
-  "url": "https://github.com/Kiowx/save_manager/releases/download/v1.4.5/SteamSaveManager.exe"
+  "url": "https://github.com/Kiowx/save_manager/releases/download/v1.4.6/SteamSaveManager.exe",
+  "notes": "1. 优化智能云存档的启动保护逻辑，减少正常启动游戏后产生同步冲突的概率。\n2. 仅在软件启动时检测到游戏已经运行的情况下启用上传保护，避免覆盖可能已被游戏读取的旧存档。\n3. 正常检测到游戏新启动时仍会自动下载云端存档，但不再默认阻止游戏结束后的自动上传。\n4. 新增每个游戏独立的存档自动同步开关，默认开启。\n5. 游戏详情页新增存档自动同步此游戏开关，可单独控制某个游戏是否参与云存档同步。\n6. 关闭单个游戏同步后，该游戏会跳过智能云存档监控、同步全部和自动同步重试。\n7. 手动同步已关闭同步的游戏时，会提示先在游戏详情页开启同步。\n8. 保留原有全局存档自动同步开关，新增单游戏开关作为二级控制。\n9. Optimized the Smart Cloud Save startup protection logic to reduce unnecessary sync conflicts after normal game launches.\n10. Only enable upload protection when the app starts while a game is already running, preventing possible overwrites of saves that may have already been loaded by the game.\n11. When a newly launched game is detected normally, the app still downloads the cloud save automatically, but no longer blocks automatic upload after the game exits by default.\n12. Added a per-game save sync toggle, enabled by default.\n13. Added a Save Sync for This Game toggle on the game detail page, allowing each game to be included in or excluded from cloud save sync independently.\n14. When per-game sync is disabled, that game is skipped by Smart Cloud Save monitoring, Sync All, and automatic sync retries.\n15. Manual sync for a game with sync disabled now shows a prompt asking the user to enable sync first.\n16. Kept the existing global automatic save sync toggle; the new per-game toggle works as a secondary control.",
+  "version": "1.4.6",
+  "sha256": "171795b48b0ded66cb4e9c98b5ef19f0a11313ba50697be67ff1fd36bd6decba"
 }
