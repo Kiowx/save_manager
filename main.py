@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Steam 游戏存档备份管理器 v1.4.5 — 通用版"""
+"""Steam 游戏存档备份管理器 v1.4.6 — 通用版"""
 
 import os
 import sys
@@ -101,7 +101,7 @@ except ImportError as exc:
 # ══════════════════════════════════════════════
 
 APP_NAME = "Steam Save Manager"
-VERSION = "1.4.5"
+VERSION = "1.4.6"
 APP_DIR = Path(os.path.dirname(os.path.abspath(sys.argv[0])))
 LEGACY_CONFIG_DIR = Path.home() / ".steam_save_manager"
 STARTUP_AUTOSTART_FLAG = "--startup-launch"
@@ -2454,6 +2454,12 @@ def set_game_monitor_processes(game: dict, values):
         game.pop("monitor_processes", None)
 
 
+def is_game_sync_enabled(game: Optional[dict]) -> bool:
+    if not isinstance(game, dict):
+        return False
+    return bool(game.get("sync_enabled", True))
+
+
 def format_monitor_processes(values) -> str:
     return ", ".join(normalize_monitor_processes(values))
 
@@ -4023,6 +4029,9 @@ def load_config() -> dict:
             old_primary = game.get("save_path", "")
             old_specs = list(game.get("save_specs", [])) if isinstance(game.get("save_specs", []), list) else []
             old_monitor = list(game.get("monitor_processes", [])) if isinstance(game.get("monitor_processes", []), list) else game.get("monitor_processes", "")
+            if "sync_enabled" not in game:
+                game["sync_enabled"] = True
+                changed = True
             normalized_specs = get_game_save_specs(game, existing_only=False)
             set_game_save_specs(game, normalized_specs)
             set_game_monitor_processes(game, old_monitor)
@@ -6067,6 +6076,8 @@ def _sync_game_save_impl(game: dict, sync_folder: str, mode: str = "smart",
     返回操作描述。
     """
     lang = cfg_language(cfg)
+    if not is_game_sync_enabled(game):
+        return bilingual_text(lang, "跳过：此游戏已关闭存档自动同步", "Skipped: save sync is disabled for this game")
     sync_tag = bilingual_text(lang, "自动同步成功", "Auto sync completed") if auto else bilingual_text(lang, "同步成功", "Sync completed")
     pre_sync_backup_tag = bilingual_text(lang, "同步前自动备份", "Auto backup before sync")
     if mode == "smart":
@@ -6426,6 +6437,13 @@ def sync_all_games(cfg: dict, auto: bool = False) -> list[tuple[str, str]]:
     sf = cfg.get("sync_folder", "")
     mode = cfg.get("sync_mode", "bidirectional")
     for g in cfg.get("games", []):
+        if not is_game_sync_enabled(g):
+            results.append((g.get("name", ""), bilingual_cfg(
+                cfg,
+                "跳过：此游戏已关闭存档自动同步",
+                "Skipped: save sync is disabled for this game",
+            )))
+            continue
         try:
             r = sync_game_save(g, sf, mode, auto=auto, cfg=cfg)
         except Exception as e:
@@ -7106,6 +7124,8 @@ class GameProcessMonitor:
         for game in self.cfg.get("games", []):
             if not isinstance(game, dict):
                 continue
+            if not is_game_sync_enabled(game):
+                continue
             key = get_game_runtime_key(game)
             if not key:
                 continue
@@ -7493,7 +7513,8 @@ class GameProcessMonitor:
     def _monitor_loop(self):
         game_by_runtime_key = {
             get_game_runtime_key(g): g
-            for g in self.cfg.get("games", []) if isinstance(g, dict) and get_game_runtime_key(g)
+            for g in self.cfg.get("games", [])
+            if isinstance(g, dict) and is_game_sync_enabled(g) and get_game_runtime_key(g)
         }
         sync_folder = get_effective_sync_root(self.cfg.get("sync_folder", ""), self.cfg, ensure=True)
         def _log(msg: str):
@@ -7591,7 +7612,8 @@ class GameProcessMonitor:
                         pass
             game_by_runtime_key = {
                 get_game_runtime_key(g): g
-                for g in self.cfg.get("games", []) if isinstance(g, dict) and get_game_runtime_key(g)
+                for g in self.cfg.get("games", [])
+                if isinstance(g, dict) and is_game_sync_enabled(g) and get_game_runtime_key(g)
             }
 
             current = self._find_running_games()
@@ -7604,7 +7626,6 @@ class GameProcessMonitor:
                 _ts = datetime.datetime.now().strftime("%H:%M:%S")
                 if g and sync_folder:
                     try:
-                        guarded = self._arm_upload_guard_after_launch(g, sync_folder)
                         r = sync_game_save(g, sync_folder, "download",
                                            auto=True, cfg=self.cfg)
                         _cb = self._on_backups_changed_cb
@@ -7618,12 +7639,6 @@ class GameProcessMonitor:
                             f"↓ {g['name']}: {r}",
                             f"↓ {g['name']}: {r}",
                         ))
-                        if guarded:
-                            self.sync_log.append(f"[{_ts}] " + bilingual_cfg(
-                                self.cfg,
-                                f"🛡 {g['name']} 已启用启动保护：本轮运行结束前将跳过自动上传",
-                                f"🛡 Startup protection enabled for {g['name']}: automatic upload will be skipped for this run",
-                            ))
                         if self.cfg.get("sync_notify", True):
                             send_desktop_notification(
                                 bilingual_cfg(self.cfg, "存档管家 · 云存档下载", "Steam Save Manager · Cloud Save Download"),
@@ -9749,7 +9764,7 @@ class SteamSaveManager(ctk.CTk):
             if not n or not save_paths:
                 self._show_warning(self.bi("提示", "Notice"), self.bi("请填写名称并至少添加一个存档目录", "Please enter a name and add at least one save folder")); return
             appid = ae.get().strip()
-            game = {"name": n, "appid": appid}
+            game = {"name": n, "appid": appid, "sync_enabled": True}
             set_game_save_paths(game, save_paths)
             set_game_monitor_processes(game, pe.get().strip())
             ensure_game_storage_identity(game)
@@ -10027,6 +10042,14 @@ class SteamSaveManager(ctk.CTk):
             onvalue="on", offvalue="off", font=font(12),
             command=self._toggle_game_auto_backup)
         self._detail_auto_switch.grid(row=0, column=1, padx=(0, 16), pady=14, sticky="w")
+        self._detail_sync_var = ctk.StringVar(value="on")
+        self._detail_sync_switch = ctk.CTkSwitch(
+            settings_card, text=self.bi("存档自动同步此游戏（智能云存档 / 同步全部时包含此游戏）",
+                                        "Sync saves for this game (included in Smart Cloud Save and Sync All)"),
+            variable=self._detail_sync_var,
+            onvalue="on", offvalue="off", font=font(12),
+            command=self._toggle_game_sync_enabled)
+        self._detail_sync_switch.grid(row=1, column=1, padx=(0, 16), pady=(0, 14), sticky="w")
 
         # Row 6: 备份历史按钮卡片
         bk_card = ctk.CTkFrame(frame, fg_color=C_CARD_BG, corner_radius=12)
@@ -10110,6 +10133,7 @@ class SteamSaveManager(ctk.CTk):
         # 单独设置：自动备份开关
         auto_on = g.get("auto_backup", True)
         self._detail_auto_var.set("on" if auto_on else "off")
+        self._detail_sync_var.set("on" if is_game_sync_enabled(g) else "off")
 
         # 备份历史：只更新计数标签
         self._detail_bk_count_label.configure(
@@ -10318,7 +10342,12 @@ class SteamSaveManager(ctk.CTk):
             sync_mode = self.cfg.get("sync_mode", "")
             sync_folder = get_effective_sync_root(self.cfg.get("sync_folder", ""), self.cfg, ensure=False)
             sync_issue = get_sync_backend_issue(self.cfg.get("sync_folder", ""), self.cfg)
-            if not sync_enabled:
+            current_game = self.cfg["games"][self._detail_idx] if hasattr(self, "_detail_idx") and self._detail_idx < len(self.cfg.get("games", [])) else None
+            if current_game is not None and not is_game_sync_enabled(current_game):
+                self._detail_sync_monitor_status.configure(text=self.bi("此游戏已关闭存档自动同步", "Save sync is disabled for this game."))
+                self._detail_sync_badge.configure(
+                    text=self.bi("⏸ 游戏关闭", "⏸ Game Off"), text_color=C_SUBTLE_TEXT)
+            elif not sync_enabled:
                 self._detail_sync_monitor_status.configure(text=self.bi("同步功能未启用，请在设置中开启", "Sync is disabled. Enable it in Settings."))
                 self._detail_sync_badge.configure(
                     text=self.bi("⏸ 关闭", "⏸ Off"), text_color=C_SUBTLE_TEXT)
@@ -10924,6 +10953,15 @@ class SteamSaveManager(ctk.CTk):
         if self.cfg.get("watch_enabled"):
             self._stop_watchers()
             self._start_watchers()
+
+    def _toggle_game_sync_enabled(self):
+        idx = self._detail_idx
+        en = self._detail_sync_var.get() == "on"
+        self.cfg["games"][idx]["sync_enabled"] = en
+        clear_game_sync_state(self.cfg, self.cfg["games"][idx])
+        save_config(self.cfg)
+        self._restart_sync_runtime()
+        self._refresh_proc_status()
 
     def _start_detail_refresh(self):
         """启动详情页自动刷新定时器（每 15 秒检查备份变化）"""
@@ -12342,6 +12380,12 @@ class SteamSaveManager(ctk.CTk):
             self._notify_io_busy()
             return
         g = dict(self.cfg["games"][idx])
+        if not is_game_sync_enabled(g):
+            self._show_info(
+                self.bi("同步已关闭", "Sync Disabled"),
+                self.bi("此游戏已关闭存档自动同步，请先在游戏详情页开启。", "Save sync is disabled for this game. Enable it on the game detail page first."),
+            )
+            return
         sf = get_effective_sync_root(self.cfg.get("sync_folder", ""), self.cfg, ensure=True)
         if not sf:
             issue = get_sync_backend_issue(self.cfg.get("sync_folder", ""), self.cfg)
