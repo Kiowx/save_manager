@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Steam 游戏存档备份管理器 v1.4.6 — 通用版"""
+"""Steam 游戏存档备份管理器 v1.4.7 — 通用版"""
 
 import os
 import sys
@@ -101,7 +101,7 @@ except ImportError as exc:
 # ══════════════════════════════════════════════
 
 APP_NAME = "Steam Save Manager"
-VERSION = "1.4.6"
+VERSION = "1.4.7"
 APP_DIR = Path(os.path.dirname(os.path.abspath(sys.argv[0])))
 LEGACY_CONFIG_DIR = Path.home() / ".steam_save_manager"
 STARTUP_AUTOSTART_FLAG = "--startup-launch"
@@ -175,6 +175,9 @@ UPDATE_MANIFEST_URL = "https://raw.githubusercontent.com/Kiowx/save_manager/refs
 CONFIG_SAVE_LOCK = threading.Lock()
 SAVE_IO_LOCK = threading.RLock()
 _CONFIG_BATCH_STATE = threading.local()
+SAVE_SPEC_SNAPSHOT_CACHE_LOCK = threading.Lock()
+SAVE_SPEC_SNAPSHOT_CACHE: dict[tuple, dict] = {}
+SAVE_SPEC_SNAPSHOT_CACHE_MAX = 256
 
 ZIP_EXTRACT_MAX_FILES = 200_000
 ZIP_EXTRACT_MAX_MEMBER_BYTES = 10 * 1024 * 1024 * 1024
@@ -852,28 +855,56 @@ def parse_vdf(text: str) -> dict:
 
 AUTOSTART_REG_KEY = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Run"
 AUTOSTART_REG_NAME = "SteamSaveManager"
+AUTOSTART_STARTUP_CMD = "SteamSaveManager.cmd"
+
+
+def _autostart_script_path() -> str:
+    return str(_current_executable_path())
+
+
+def _windows_startup_cmd_path() -> Path:
+    return APPDATA / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup" / AUTOSTART_STARTUP_CMD
+
+
+def _quoted_command_paths_exist(command: str) -> bool:
+    paths = re.findall(r'"([^"]+)"', str(command or ""))
+    if not paths:
+        return False
+    return all(Path(path).exists() for path in paths)
+
+
+def _write_windows_startup_cmd(command: str):
+    cmd_path = _windows_startup_cmd_path()
+    cmd_path.parent.mkdir(parents=True, exist_ok=True)
+    cmd_path.write_text(f'@echo off\r\nchcp 65001 >nul\r\nstart "" {command}\r\n', encoding="utf-8")
+
+
+def _remove_windows_startup_cmd():
+    _windows_startup_cmd_path().unlink(missing_ok=True)
 
 
 def get_autostart_enabled() -> bool:
     """检查当前是否已设置开机自启"""
     if sys.platform == "win32" and winreg:
         key = None
+        registry_enabled = False
         try:
             key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, AUTOSTART_REG_KEY,
                                  0, winreg.KEY_READ)
             val, _ = winreg.QueryValueEx(key, AUTOSTART_REG_NAME)
-            return bool(val)
+            registry_enabled = bool(val) and _quoted_command_paths_exist(val)
         except FileNotFoundError:
-            return False
+            registry_enabled = False
         except Exception as e:
             logger.warning("检查自启状态失败: %s", e)
-            return False
+            registry_enabled = False
         finally:
             if key is not None:
                 try:
                     winreg.CloseKey(key)
                 except Exception:
                     pass
+        return registry_enabled or _windows_startup_cmd_path().exists()
     elif sys.platform == "darwin":
         plist = Path.home() / "Library" / "LaunchAgents" / "com.steamsavemanager.plist"
         return plist.exists()
@@ -884,16 +915,17 @@ def get_autostart_enabled() -> bool:
 
 def set_autostart_enabled(enable: bool):
     """设置或取消开机自启"""
-    script_path = os.path.abspath(sys.argv[0])
+    script_path = _autostart_script_path()
     python_path = sys.executable
 
     if sys.platform == "win32" and winreg:
+        errors = []
+        cmd = _build_autostart_command(script_path, python_path)
         key = None
         try:
-            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, AUTOSTART_REG_KEY,
-                                 0, winreg.KEY_SET_VALUE)
+            key = winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER, AUTOSTART_REG_KEY,
+                                     0, winreg.KEY_SET_VALUE)
             if enable:
-                cmd = _build_autostart_command(script_path, python_path)
                 winreg.SetValueEx(key, AUTOSTART_REG_NAME, 0, winreg.REG_SZ, cmd)
             else:
                 try:
@@ -901,13 +933,24 @@ def set_autostart_enabled(enable: bool):
                 except FileNotFoundError:
                     pass
         except Exception as e:
-            raise RuntimeError(f"设置自启失败：{e}")
+            errors.append(f"registry: {e}")
         finally:
             if key is not None:
                 try:
                     winreg.CloseKey(key)
                 except Exception:
                     pass
+        try:
+            if enable:
+                _write_windows_startup_cmd(cmd)
+            else:
+                _remove_windows_startup_cmd()
+        except Exception as e:
+            errors.append(f"startup folder: {e}")
+        if enable and errors and not get_autostart_enabled():
+            raise RuntimeError(f"设置自启失败：{'; '.join(errors)}")
+        if not enable and errors and get_autostart_enabled():
+            raise RuntimeError(f"取消自启失败：{'; '.join(errors)}")
 
     elif sys.platform == "darwin":
         plist = Path.home() / "Library" / "LaunchAgents" / "com.steamsavemanager.plist"
@@ -2460,6 +2503,12 @@ def is_game_sync_enabled(game: Optional[dict]) -> bool:
     return bool(game.get("sync_enabled", True))
 
 
+def is_game_favorite(game: Optional[dict]) -> bool:
+    if not isinstance(game, dict):
+        return False
+    return bool(game.get("favorite", False))
+
+
 def format_monitor_processes(values) -> str:
     return ", ".join(normalize_monitor_processes(values))
 
@@ -2599,19 +2648,36 @@ def compute_save_spec_snapshot(specs: list[dict]) -> dict:
     for idx, spec, abs_f, rel in iter_save_spec_files(specs):
         file_count += 1
         try:
-            latest_mtime = max(latest_mtime, abs_f.stat().st_mtime)
+            st = abs_f.stat()
+            latest_mtime = max(latest_mtime, st.st_mtime)
+            size = int(st.st_size)
+            mtime_ns = int(getattr(st, "st_mtime_ns", int(st.st_mtime * 1_000_000_000)))
         except OSError:
-            pass
-        all_files.append((idx, rel, str(abs_f)))
+            size = -1
+            mtime_ns = -1
+        all_files.append((idx, rel, str(abs_f), size, mtime_ns))
     all_files.sort(key=lambda item: (item[0], item[1].lower(), item[2].lower()))
-    for idx, rel, file_path in all_files:
+    cache_key = tuple(
+        (idx, rel, os.path.normcase(os.path.abspath(file_path)), size, mtime_ns)
+        for idx, rel, file_path, size, mtime_ns in all_files
+    )
+    with SAVE_SPEC_SNAPSHOT_CACHE_LOCK:
+        cached = SAVE_SPEC_SNAPSHOT_CACHE.get(cache_key)
+        if cached is not None:
+            return dict(cached)
+    for idx, rel, file_path, _, _ in all_files:
         h.update(f"{idx}:{rel}".encode("utf-8", errors="ignore"))
         _streaming_file_hash(file_path, h)
-    return {
+    snapshot = {
         "hash": h.hexdigest(),
         "file_count": file_count,
         "latest_mtime": latest_mtime,
     }
+    with SAVE_SPEC_SNAPSHOT_CACHE_LOCK:
+        SAVE_SPEC_SNAPSHOT_CACHE[cache_key] = dict(snapshot)
+        while len(SAVE_SPEC_SNAPSHOT_CACHE) > SAVE_SPEC_SNAPSHOT_CACHE_MAX:
+            SAVE_SPEC_SNAPSHOT_CACHE.pop(next(iter(SAVE_SPEC_SNAPSHOT_CACHE)), None)
+    return snapshot
 
 
 def compute_save_spec_hash(specs: list[dict]) -> str:
@@ -4031,6 +4097,9 @@ def load_config() -> dict:
             old_monitor = list(game.get("monitor_processes", [])) if isinstance(game.get("monitor_processes", []), list) else game.get("monitor_processes", "")
             if "sync_enabled" not in game:
                 game["sync_enabled"] = True
+                changed = True
+            if "favorite" not in game:
+                game["favorite"] = False
                 changed = True
             normalized_specs = get_game_save_specs(game, existing_only=False)
             set_game_save_specs(game, normalized_specs)
@@ -6748,6 +6817,38 @@ def _cleanup_old_restore_safety_dirs(target: Path, keep: int = RESTORE_SAFETY_KE
             logger.debug("清理旧还原安全备份目录失败 %s: %s", item, e)
 
 
+def _copy_matching_spec_files_to_safety(specs: list[dict], safety_dir: Path) -> int:
+    copied = 0
+    seen = set()
+    for _, spec, abs_f, rel in iter_save_spec_files(specs):
+        try:
+            key = os.path.normcase(os.path.abspath(str(abs_f)))
+            if key in seen:
+                continue
+            seen.add(key)
+            dest = _zip_safe_restore_path(safety_dir, rel)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(abs_f, dest)
+            copied += 1
+        except Exception as e:
+            raise OSError(f"Failed to create restore safety copy for {abs_f}: {e}") from e
+    return copied
+
+
+def _copy_safety_files_to_target(safety_dir: Path, target: Path):
+    if not safety_dir.is_dir():
+        return
+    for root, _, files in os.walk(safety_dir):
+        rel_root = os.path.relpath(root, safety_dir)
+        target_dir = target if rel_root == "." else target / rel_root
+        target_dir.mkdir(parents=True, exist_ok=True)
+        for file_name in files:
+            src_file = Path(root) / file_name
+            dest_file = target_dir / file_name
+            dest_file.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src_file, dest_file)
+
+
 def _zip_safe_restore_path(base_dir: Path, relative_name: str) -> Path:
     normalized = (relative_name or "").replace("\\", "/")
     rel_path = PurePosixPath(normalized)
@@ -6813,19 +6914,30 @@ def restore_backup(zip_path: str, target_dir):
         if not restore_entries:
             return
         touched_dirs: dict[str, Path] = {}
+        specs_by_target: dict[str, list[dict]] = {}
         for _, spec, _, _ in restore_entries:
             target = Path(spec["base"])
-            touched_dirs[os.path.normcase(os.path.normpath(str(target)))] = target
-        restore_records: dict[str, tuple[Path, Optional[Path], bool]] = {}
-        for target in touched_dirs.values():
             target_key = os.path.normcase(os.path.normpath(str(target)))
+            touched_dirs[target_key] = target
+            specs_for_target = specs_by_target.setdefault(target_key, [])
+            if not any(
+                os.path.normcase(os.path.normpath(str(existing.get("base", "")))) == os.path.normcase(os.path.normpath(str(spec.get("base", ""))))
+                and existing.get("includes", []) == spec.get("includes", [])
+                and bool(existing.get("recursive", True)) == bool(spec.get("recursive", True))
+                for existing in specs_for_target
+            ):
+                specs_for_target.append(spec)
+        restore_records: dict[str, tuple[Path, Optional[Path], bool, list[dict]]] = {}
+        for target_key, target in touched_dirs.items():
+            specs_for_target = specs_by_target.get(target_key, [])
             if target.exists():
                 safety_dir = _restore_safety_dir(target)
-                shutil.copytree(target, safety_dir)
-                restore_records[target_key] = (target, safety_dir, True)
+                safety_dir.mkdir(parents=True, exist_ok=True)
+                _copy_matching_spec_files_to_safety(specs_for_target, safety_dir)
+                restore_records[target_key] = (target, safety_dir, True, specs_for_target)
             else:
                 target.mkdir(parents=True, exist_ok=True)
-                restore_records[target_key] = (target, None, False)
+                restore_records[target_key] = (target, None, False, specs_for_target)
         try:
             prepared_targets = set()
             for target_idx, spec, _, _ in restore_entries:
@@ -6837,16 +6949,21 @@ def restore_backup(zip_path: str, target_dir):
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 with zf.open(member) as src, open(dest, "wb") as dst:
                     shutil.copyfileobj(src, dst)
-            for target, _, _ in restore_records.values():
+            for target, _, _, _ in restore_records.values():
                 _cleanup_old_restore_safety_dirs(target)
         except Exception as restore_error:
             rollback_errors = []
-            for target, safety_dir, existed_before in restore_records.values():
+            for target, safety_dir, existed_before, specs_for_target in restore_records.values():
                 try:
-                    if target.exists():
-                        shutil.rmtree(target)
-                    if existed_before and safety_dir is not None and safety_dir.exists():
-                        shutil.copytree(safety_dir, target)
+                    if not existed_before:
+                        if target.exists():
+                            shutil.rmtree(target)
+                        continue
+                    target.mkdir(parents=True, exist_ok=True)
+                    for spec in specs_for_target:
+                        _remove_matching_spec_files(spec)
+                    if safety_dir is not None and safety_dir.exists():
+                        _copy_safety_files_to_target(safety_dir, target)
                 except Exception as rollback_error:
                     rollback_errors.append(f"{target}: {type(rollback_error).__name__}: {rollback_error}")
             if rollback_errors:
@@ -9285,7 +9402,7 @@ class SteamSaveManager(ctk.CTk):
         if any(game_matches_save_target(g, appid, save_specs=save_specs, save_paths=save_paths) for g in games):
             self._show_info(self.bi("提示", "Notice"), self.bi(f"「{name}」已添加过", f"{name} has already been added"))
             return
-        game = {"appid": appid, "name": name}
+        game = {"appid": appid, "name": name, "favorite": False}
         if save_specs:
             set_game_save_specs(game, save_specs)
         else:
@@ -9325,7 +9442,7 @@ class SteamSaveManager(ctk.CTk):
             save_specs = self._collect_scan_add_specs(appid, selected)
             if any(game_matches_save_target(g, appid, save_specs=save_specs, save_paths=save_paths) for g in games):
                 continue
-            game = {"appid": appid, "name": result["name"]}
+            game = {"appid": appid, "name": result["name"], "favorite": False}
             if save_specs:
                 set_game_save_specs(game, save_specs)
             else:
@@ -9475,6 +9592,8 @@ class SteamSaveManager(ctk.CTk):
                 continue
             filtered_games.append((idx, g))
 
+        filtered_games.sort(key=lambda item: (0 if is_game_favorite(item[1]) else 1, item[0]))
+
         total_games = len(filtered_games)
         self._games_page, start, end = self._page_range(
             self._games_page, total_games, self._games_page_size
@@ -9503,10 +9622,15 @@ class SteamSaveManager(ctk.CTk):
             if item is None:
                 card = ctk.CTkFrame(self._games_scroll,
                                     fg_color=("#f1f5f9", "#252640"), corner_radius=12)
-                card.grid_columnconfigure(1, weight=1)
+                card.grid_columnconfigure(0, weight=1)
                 title = ctk.CTkLabel(card, text="", font=font(14, "bold"),
-                                     text_color=C_BODY_TEXT)
-                title.grid(row=0, column=0, columnspan=2, padx=14, pady=(10, 4), sticky="w")
+                                     text_color=C_BODY_TEXT, anchor="w", justify="left",
+                                     wraplength=620)
+                title.grid(row=0, column=0, padx=14, pady=(10, 4), sticky="ew")
+                favorite_btn = ctk.CTkButton(
+                    card, text="", width=34, height=28,
+                    font=font(13, "bold"), corner_radius=6)
+                favorite_btn.grid(row=0, column=1, padx=14, pady=(8, 4), sticky="e")
                 path_label = ctk.CTkLabel(card, text="", font=font(11),
                                           text_color=C_SUBTLE_TEXT)
                 path_label.grid(row=1, column=0, columnspan=2, padx=14, pady=(0, 4), sticky="w")
@@ -9535,6 +9659,7 @@ class SteamSaveManager(ctk.CTk):
                     "title": title,
                     "path": path_label,
                     "backup": backup_label,
+                    "favorite_btn": favorite_btn,
                     "detail_btn": detail_btn,
                     "backup_btn": backup_btn,
                     "delete_btn": delete_btn,
@@ -9544,6 +9669,8 @@ class SteamSaveManager(ctk.CTk):
             nm = g["name"]
             if g.get("appid"):
                 nm += f"  (AppID: {g['appid']})"
+            if is_game_favorite(g):
+                nm = "★ " + nm
             item["title"].configure(text=nm)
 
             save_paths = get_game_save_paths(g, existing_only=False)
@@ -9557,6 +9684,14 @@ class SteamSaveManager(ctk.CTk):
             bc = self._get_game_backup_count_cached(g)
             item["backup"].configure(text=self.bi(f"备份数：{bc}", f"Backups: {bc}"))
 
+            favorite_on = is_game_favorite(g)
+            item["favorite_btn"].configure(
+                text="★" if favorite_on else "☆",
+                fg_color=BTN_WARN if favorite_on else BTN_SECONDARY,
+                hover_color=BTN_WARN_H if favorite_on else BTN_SECONDARY_H,
+                text_color="#ffffff" if favorite_on else C_BODY_TEXT,
+                command=lambda i=idx: self._toggle_game_favorite(i),
+            )
             item["detail_btn"].configure(command=lambda i=idx: self._show_game_detail(i))
             item["backup_btn"].configure(command=lambda i=idx: self._manual_backup(i))
             item["delete_btn"].configure(command=lambda i=idx: self._delete_game(i))
@@ -9764,7 +9899,7 @@ class SteamSaveManager(ctk.CTk):
             if not n or not save_paths:
                 self._show_warning(self.bi("提示", "Notice"), self.bi("请填写名称并至少添加一个存档目录", "Please enter a name and add at least one save folder")); return
             appid = ae.get().strip()
-            game = {"name": n, "appid": appid, "sync_enabled": True}
+            game = {"name": n, "appid": appid, "sync_enabled": True, "favorite": False}
             set_game_save_paths(game, save_paths)
             set_game_monitor_processes(game, pe.get().strip())
             ensure_game_storage_identity(game)
@@ -10050,6 +10185,14 @@ class SteamSaveManager(ctk.CTk):
             onvalue="on", offvalue="off", font=font(12),
             command=self._toggle_game_sync_enabled)
         self._detail_sync_switch.grid(row=1, column=1, padx=(0, 16), pady=(0, 14), sticky="w")
+        self._detail_favorite_var = ctk.StringVar(value="off")
+        self._detail_favorite_switch = ctk.CTkSwitch(
+            settings_card, text=self.bi("收藏此游戏（在游戏列表中优先显示）",
+                                        "Favorite this game (show it first in the Games list)"),
+            variable=self._detail_favorite_var,
+            onvalue="on", offvalue="off", font=font(12),
+            command=self._toggle_game_favorite_from_detail)
+        self._detail_favorite_switch.grid(row=2, column=1, padx=(0, 16), pady=(0, 14), sticky="w")
 
         # Row 6: 备份历史按钮卡片
         bk_card = ctk.CTkFrame(frame, fg_color=C_CARD_BG, corner_radius=12)
@@ -10134,6 +10277,7 @@ class SteamSaveManager(ctk.CTk):
         auto_on = g.get("auto_backup", True)
         self._detail_auto_var.set("on" if auto_on else "off")
         self._detail_sync_var.set("on" if is_game_sync_enabled(g) else "off")
+        self._detail_favorite_var.set("on" if is_game_favorite(g) else "off")
 
         # 备份历史：只更新计数标签
         self._detail_bk_count_label.configure(
@@ -10962,6 +11106,26 @@ class SteamSaveManager(ctk.CTk):
         save_config(self.cfg)
         self._restart_sync_runtime()
         self._refresh_proc_status()
+
+    def _toggle_game_favorite(self, idx: int):
+        if idx < 0 or idx >= len(self.cfg.get("games", [])):
+            return
+        game = self.cfg["games"][idx]
+        game["favorite"] = not is_game_favorite(game)
+        save_config(self.cfg)
+        self._refresh_games_list()
+        if getattr(self, "_current_frame", "") == "game_detail" and getattr(self, "_detail_idx", None) == idx:
+            self._detail_favorite_var.set("on" if is_game_favorite(game) else "off")
+
+    def _toggle_game_favorite_from_detail(self):
+        idx = self._detail_idx
+        if idx < 0 or idx >= len(self.cfg.get("games", [])):
+            return
+        game = self.cfg["games"][idx]
+        game["favorite"] = self._detail_favorite_var.get() == "on"
+        save_config(self.cfg)
+        if getattr(self, "_games_scroll", None) is not None:
+            self._refresh_games_list()
 
     def _start_detail_refresh(self):
         """启动详情页自动刷新定时器（每 15 秒检查备份变化）"""
@@ -12716,6 +12880,8 @@ def acquire_lock() -> bool:
 if __name__ == "__main__":
     ensure_dirs()
     if not acquire_lock():
+        if STARTUP_LAUNCH:
+            sys.exit(0)
         # 已有实例在运行，弹出提示后退出
         boot_lang = normalize_language("")
         root = ctk.CTk()
