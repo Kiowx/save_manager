@@ -1,6 +1,6 @@
 {
-  "url": "https://github.com/Kiowx/save_manager/releases/download/v1.4.6/SteamSaveManager.exe",
-  "notes": "1. 优化智能云存档的启动保护逻辑，减少正常启动游戏后产生同步冲突的概率。\n2. 仅在软件启动时检测到游戏已经运行的情况下启用上传保护，避免覆盖可能已被游戏读取的旧存档。\n3. 正常检测到游戏新启动时仍会自动下载云端存档，但不再默认阻止游戏结束后的自动上传。\n4. 新增每个游戏独立的存档自动同步开关，默认开启。\n5. 游戏详情页新增存档自动同步此游戏开关，可单独控制某个游戏是否参与云存档同步。\n6. 关闭单个游戏同步后，该游戏会跳过智能云存档监控、同步全部和自动同步重试。\n7. 手动同步已关闭同步的游戏时，会提示先在游戏详情页开启同步。\n8. 保留原有全局存档自动同步开关，新增单游戏开关作为二级控制。\n9. Optimized the Smart Cloud Save startup protection logic to reduce unnecessary sync conflicts after normal game launches.\n10. Only enable upload protection when the app starts while a game is already running, preventing possible overwrites of saves that may have already been loaded by the game.\n11. When a newly launched game is detected normally, the app still downloads the cloud save automatically, but no longer blocks automatic upload after the game exits by default.\n12. Added a per-game save sync toggle, enabled by default.\n13. Added a Save Sync for This Game toggle on the game detail page, allowing each game to be included in or excluded from cloud save sync independently.\n14. When per-game sync is disabled, that game is skipped by Smart Cloud Save monitoring, Sync All, and automatic sync retries.\n15. Manual sync for a game with sync disabled now shows a prompt asking the user to enable sync first.\n16. Kept the existing global automatic save sync toggle; the new per-game toggle works as a secondary control.",
-  "version": "1.4.6",
-  "sha256": "171795b48b0ded66cb4e9c98b5ef19f0a11313ba50697be67ff1fd36bd6decba"
+  "url": "https://github.com/Kiowx/save_manager/releases/download/v1.4.7/SteamSaveManager.exe",
+  "version": "1.4.7",
+  "notes": "1. 新增游戏收藏功能，支持收藏多款游戏，收藏后优先显示在游戏列表顶部，旧配置自动补齐收藏字段，默认不收藏，保持兼容\n2. 优化 Windows 开机自启动兼容性，增加启动文件夹兜底，改善 Win10 无法随系统启动的问题\n3. 修复自启动注册表项不存在时写入失败的问题，并改用真实可执行路径\n4. 修复失效自启动项可能被误判为已开启的问题，避免开机自启动重复触发时弹出重复运行提示\n5. 优化存档快照计算性能，对未变化的存档文件复用缓存结果，减少重复哈希带来的卡顿\n6. 优化备份还原安全机制，还原前只保护当前游戏匹配的存档文件，避免整目录复制过慢或误影响无关文件，还原失败回滚时只恢复本次涉及的存档文件，降低对同目录下其他文件的影响，同时自动清理旧的还原安全目录，避免长期积累占用磁盘空间",
+  "sha256": "6207c5a808e4d901c508bedb2dac4324e4328cee8c0555d15934f5a9f885eb2d"
 }
