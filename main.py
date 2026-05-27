@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Steam 游戏存档备份管理器 v1.4.7 — 通用版"""
+"""Steam 游戏存档备份管理器 v1.4.8 — 通用版"""
 
 import os
 import sys
@@ -101,7 +101,7 @@ except ImportError as exc:
 # ══════════════════════════════════════════════
 
 APP_NAME = "Steam Save Manager"
-VERSION = "1.4.7"
+VERSION = "1.4.8"
 APP_DIR = Path(os.path.dirname(os.path.abspath(sys.argv[0])))
 LEGACY_CONFIG_DIR = Path.home() / ".steam_save_manager"
 STARTUP_AUTOSTART_FLAG = "--startup-launch"
@@ -7926,8 +7926,10 @@ class SaveChangeHandler(FileSystemEventHandler):
 
 if sys.platform == "win32":
     FONT_FAMILY = "Microsoft YaHei UI"
-else:
+elif sys.platform == "darwin":
     FONT_FAMILY = "PingFang SC"
+else:
+    FONT_FAMILY = "WenQuanYi Micro Hei"
 
 
 def font(size: int = 13, weight: str = "normal") -> ctk.CTkFont:
@@ -8282,6 +8284,12 @@ class SteamSaveManager(ctk.CTk):
         window.title(title)
         if geometry:
             window.geometry(geometry)
+        try:
+            sw = self.winfo_screenwidth()
+            sh = self.winfo_screenheight()
+            window.maxsize(max(sw - 100, 400), max(sh - 100, 300))
+        except Exception:
+            pass
         self._prepare_popup(window)
         return window
 
@@ -8640,11 +8648,13 @@ class SteamSaveManager(ctk.CTk):
                 row = ctk.CTkFrame(self._home_recent,
                                    fg_color=("#f1f5f9", "#252640"), corner_radius=8)
                 title = ctk.CTkLabel(
-                    row, text="", font=font(12, "bold"), text_color=C_BODY_TEXT
+                    row, text="", font=font(12, "bold"), text_color=C_BODY_TEXT,
+                    wraplength=240
                 )
                 title.pack(side="left", padx=(12, 6), pady=7)
                 info_label = ctk.CTkLabel(
-                    row, text="", font=font(11), text_color=C_SUBTLE_TEXT
+                    row, text="", font=font(11), text_color=C_SUBTLE_TEXT,
+                    wraplength=320
                 )
                 info_label.pack(side="left", padx=4, pady=7)
                 item = {"row": row, "title": title, "info": info_label}
@@ -8698,7 +8708,7 @@ class SteamSaveManager(ctk.CTk):
         search_frame.grid_columnconfigure(0, weight=1)
         self._scan_search_entry = ctk.CTkEntry(
             search_frame, textvariable=self._scan_search_var,
-            placeholder_text=self.bi("🔍 搜索游戏名称或 AppID …", "🔍 Search by game name or AppID …"),
+            placeholder_text=self.bi("搜索游戏名称或 AppID …", "Search by game name or AppID …"),
             height=34, corner_radius=8, font=font(13))
         self._scan_search_entry.grid(row=0, column=0, sticky="ew")
 
@@ -8742,8 +8752,21 @@ class SteamSaveManager(ctk.CTk):
             self._scan_add_all_btn.configure(state="normal" if can_add else "disabled")
 
     def _set_io_busy(self, busy: bool):
-        """标记 IO 操作进行中，防止重复触发"""
+        """标记 IO 操作进行中，防止重复触发；同步更新相关按钮的启用状态"""
         self._io_busy = busy
+        state = "disabled" if busy else "normal"
+        for item in self._game_cards.values():
+            try:
+                item["backup_btn"].configure(state=state)
+                item["delete_btn"].configure(state=state)
+            except Exception:
+                pass
+        for item in self._backup_rows.values():
+            try:
+                item["restore_btn"].configure(state=state)
+                item["delete_btn"].configure(state=state)
+            except Exception:
+                pass
 
     def _notify_io_busy(self):
         self._show_warning(
@@ -9526,7 +9549,7 @@ class SteamSaveManager(ctk.CTk):
         search_frame.grid_columnconfigure(0, weight=1)
         self._games_search_entry = ctk.CTkEntry(
             search_frame, textvariable=self._games_search_var,
-            placeholder_text=self.bi("🔍 搜索游戏名称或 AppID …", "🔍 Search by game name or AppID …"),
+            placeholder_text=self.bi("搜索游戏名称或 AppID …", "Search by game name or AppID …"),
             height=34, corner_radius=8, font=font(13))
         self._games_search_entry.grid(row=0, column=0, sticky="ew")
 
@@ -9632,7 +9655,9 @@ class SteamSaveManager(ctk.CTk):
                     font=font(13, "bold"), corner_radius=6)
                 favorite_btn.grid(row=0, column=1, padx=14, pady=(8, 4), sticky="e")
                 path_label = ctk.CTkLabel(card, text="", font=font(11),
-                                          text_color=C_SUBTLE_TEXT)
+                                          text_color=C_SUBTLE_TEXT,
+                                          wraplength=580, anchor="w",
+                                          justify="left")
                 path_label.grid(row=1, column=0, columnspan=2, padx=14, pady=(0, 4), sticky="w")
                 backup_label = ctk.CTkLabel(card, text="", font=font(11),
                                             text_color=C_SUBTLE_TEXT)
@@ -9675,8 +9700,6 @@ class SteamSaveManager(ctk.CTk):
 
             save_paths = get_game_save_paths(g, existing_only=False)
             p = save_paths[0] if save_paths else g.get("save_path", "")
-            if len(p) > 68:
-                p = "..." + p[-65:]
             if len(save_paths) > 1:
                 p += self.bi(f"  (+{len(save_paths)-1} 个目录)", f"  (+{len(save_paths)-1} folders)")
             item["path"].configure(text=f"📁 {p}")
@@ -9862,23 +9885,40 @@ class SteamSaveManager(ctk.CTk):
         _render_rows()
         return state
 
-    def _add_game_dialog(self):
-        d = self._create_popup(self.bi("手动添加游戏", "Add Game Manually"), "700x560")
+    def _game_form_dialog(self, idx: Optional[int] = None):
+        """通用游戏添加/编辑对话框。idx=None 为添加模式，否则为编辑模式。"""
+        is_edit = idx is not None
+        g = self.cfg["games"][idx] if is_edit else None
+        dlg_title = self.bi("编辑游戏", "Edit Game") if is_edit else self.bi("手动添加游戏", "Add Game Manually")
+        d = self._create_popup(dlg_title, "700x560")
         d.grid_columnconfigure(0, weight=1)
+        r = 0
         ctk.CTkLabel(d, text=self.bi("游戏名称", "Game Name"), font=font(13)).grid(
-            row=0, column=0, padx=24, pady=(20, 4), sticky="w")
+            row=r, column=0, padx=24, pady=(20, 4), sticky="w")
+        r += 1
         ne = ctk.CTkEntry(d, width=620, placeholder_text=self.bi("例如：Elden Ring", "Example: Elden Ring"))
-        ne.grid(row=1, column=0, padx=24, sticky="ew")
-        ctk.CTkLabel(d, text=self.bi("AppID（可选）", "AppID (Optional)"), font=font(13)).grid(
-            row=2, column=0, padx=24, pady=(12, 4), sticky="w")
-        ae = ctk.CTkEntry(d, width=200, placeholder_text=self.bi("如 1245620", "For example: 1245620"))
-        ae.grid(row=3, column=0, padx=24, sticky="w")
+        if is_edit:
+            ne.insert(0, g["name"])
+        ne.grid(row=r, column=0, padx=24, sticky="ew")
+        r += 1
+        ae = None
+        if not is_edit:
+            ctk.CTkLabel(d, text=self.bi("AppID（可选）", "AppID (Optional)"), font=font(13)).grid(
+                row=r, column=0, padx=24, pady=(12, 4), sticky="w")
+            r += 1
+            ae = ctk.CTkEntry(d, width=200, placeholder_text=self.bi("如 1245620", "For example: 1245620"))
+            ae.grid(row=r, column=0, padx=24, sticky="w")
+            r += 1
         ctk.CTkLabel(d, text=self.bi("存档路径", "Save Paths"), font=font(13)).grid(
-            row=4, column=0, padx=24, pady=(12, 4), sticky="w")
-        editor = self._create_save_paths_editor(d, width=420)
-        editor["frame"].grid(row=5, column=0, padx=24, sticky="ew")
+            row=r, column=0, padx=24, pady=(12, 4), sticky="w")
+        r += 1
+        initial_paths = get_game_save_paths(g, existing_only=False) if is_edit else None
+        editor = self._create_save_paths_editor(d, initial_paths, width=420)
+        editor["frame"].grid(row=r, column=0, padx=24, sticky="ew")
+        r += 1
         ctk.CTkLabel(d, text=self.bi("自定义监控程序（可选）", "Custom Monitor Process (Optional)"), font=font(13)).grid(
-            row=6, column=0, padx=24, pady=(12, 4), sticky="w")
+            row=r, column=0, padx=24, pady=(12, 4), sticky="w")
+        r += 1
         pe = ctk.CTkEntry(
             d, width=620,
             placeholder_text=self.bi(
@@ -9886,79 +9926,56 @@ class SteamSaveManager(ctk.CTk):
                 "For example: game.exe, game-win64-shipping.exe",
             ),
         )
-        pe.grid(row=7, column=0, padx=24, sticky="ew")
+        if is_edit:
+            pe.insert(0, format_monitor_processes(g.get("monitor_processes", [])))
+        pe.grid(row=r, column=0, padx=24, sticky="ew")
+        r += 1
         ctk.CTkLabel(
             d,
             text=self.bi("填写进程名即可，支持多个，用逗号或换行分隔", "Enter process names only. Multiple names are supported, separated by commas or new lines."),
             font=font(11),
             text_color=C_SUBTLE_TEXT,
-        ).grid(row=8, column=0, padx=24, pady=(4, 0), sticky="w")
+        ).grid(row=r, column=0, padx=24, pady=(4, 0), sticky="w")
+        r += 1
         def _sv():
-            n = ne.get().strip()
-            save_paths = editor["get_paths"]()
-            if not n or not save_paths:
-                self._show_warning(self.bi("提示", "Notice"), self.bi("请填写名称并至少添加一个存档目录", "Please enter a name and add at least one save folder")); return
-            appid = ae.get().strip()
-            game = {"name": n, "appid": appid, "sync_enabled": True, "favorite": False}
-            set_game_save_paths(game, save_paths)
-            set_game_monitor_processes(game, pe.get().strip())
-            ensure_game_storage_identity(game)
-            self.cfg.setdefault("games", []).append(game)
-            remember_recognition_path(self.cfg, appid, n, game["save_path"])
+            if is_edit:
+                old_game = dict(self.cfg["games"][idx])
+                old_game["save_paths"] = list(get_game_save_paths(self.cfg["games"][idx], existing_only=False))
+                new_name = ne.get().strip()
+                new_paths = editor["get_paths"]()
+                if not new_name or not new_paths:
+                    self._show_warning(self.bi("提示", "Notice"), self.bi("请填写名称并至少保留一个存档目录", "Please enter a name and keep at least one save folder")); return
+                self.cfg["games"][idx]["name"] = new_name
+                set_game_save_paths(self.cfg["games"][idx], new_paths)
+                set_game_monitor_processes(self.cfg["games"][idx], pe.get().strip())
+                clear_game_sync_state(self.cfg, old_game)
+                if old_game.get("save_path") and old_game.get("save_path") != self.cfg["games"][idx].get("save_path"):
+                    exclude_recognition_path(self.cfg, old_game.get("appid", ""), old_game.get("name", ""), old_game.get("save_path", ""))
+                remember_recognition_path(self.cfg, self.cfg["games"][idx].get("appid", ""), new_name, self.cfg["games"][idx].get("save_path", ""))
+            else:
+                n = ne.get().strip()
+                save_paths = editor["get_paths"]()
+                if not n or not save_paths:
+                    self._show_warning(self.bi("提示", "Notice"), self.bi("请填写名称并至少添加一个存档目录", "Please enter a name and add at least one save folder")); return
+                appid = ae.get().strip()
+                game = {"name": n, "appid": appid, "sync_enabled": True, "favorite": False}
+                set_game_save_paths(game, save_paths)
+                set_game_monitor_processes(game, pe.get().strip())
+                ensure_game_storage_identity(game)
+                self.cfg.setdefault("games", []).append(game)
+                remember_recognition_path(self.cfg, appid, n, game["save_path"])
             self._invalidate_game_backup_count_cache()
             save_config(self.cfg); self._refresh_games_list(); d.destroy()
-        ctk.CTkButton(d, text=self.bi("确认添加", "Add Game"), width=140, height=38, font=font(13, "bold"),
+        btn_text = self.bi("保存", "Save") if is_edit else self.bi("确认添加", "Add Game")
+        ctk.CTkButton(d, text=btn_text, width=140, height=38, font=font(13, "bold"),
                       corner_radius=10, fg_color=BTN_PRIMARY, hover_color=BTN_PRIMARY_H,
-                      command=_sv).grid(row=9, column=0, padx=24, pady=16)
+                      command=_sv).grid(row=r, column=0, padx=24, pady=16)
+
+    def _add_game_dialog(self):
+        self._game_form_dialog(idx=None)
 
     def _edit_game_dialog(self, idx):
-        g = self.cfg["games"][idx]
-        d = self._create_popup(self.bi("编辑游戏", "Edit Game"), "700x560")
-        d.grid_columnconfigure(0, weight=1)
-        ctk.CTkLabel(d, text=self.bi("游戏名称", "Game Name"), font=font(13)).grid(
-            row=0, column=0, padx=24, pady=(20, 4), sticky="w")
-        ne = ctk.CTkEntry(d, width=620); ne.insert(0, g["name"])
-        ne.grid(row=1, column=0, padx=24, sticky="ew")
-        ctk.CTkLabel(d, text=self.bi("存档路径", "Save Paths"), font=font(13)).grid(
-            row=2, column=0, padx=24, pady=(12, 4), sticky="w")
-        editor = self._create_save_paths_editor(d, get_game_save_paths(g, existing_only=False), width=420)
-        editor["frame"].grid(row=3, column=0, padx=24, sticky="ew")
-        ctk.CTkLabel(d, text=self.bi("自定义监控程序（可选）", "Custom Monitor Process (Optional)"), font=font(13)).grid(
-            row=4, column=0, padx=24, pady=(12, 4), sticky="w")
-        pe = ctk.CTkEntry(
-            d, width=620,
-            placeholder_text=self.bi(
-                "例如：game.exe, game-win64-shipping.exe",
-                "For example: game.exe, game-win64-shipping.exe",
-            ),
-        )
-        pe.insert(0, format_monitor_processes(g.get("monitor_processes", [])))
-        pe.grid(row=5, column=0, padx=24, sticky="ew")
-        ctk.CTkLabel(
-            d,
-            text=self.bi("填写进程名即可，支持多个，用逗号或换行分隔", "Enter process names only. Multiple names are supported, separated by commas or new lines."),
-            font=font(11),
-            text_color=C_SUBTLE_TEXT,
-        ).grid(row=6, column=0, padx=24, pady=(4, 0), sticky="w")
-        def _sv():
-            old_game = dict(self.cfg["games"][idx])
-            old_game["save_paths"] = list(get_game_save_paths(self.cfg["games"][idx], existing_only=False))
-            new_name = ne.get().strip()
-            new_paths = editor["get_paths"]()
-            if not new_name or not new_paths:
-                self._show_warning(self.bi("提示", "Notice"), self.bi("请填写名称并至少保留一个存档目录", "Please enter a name and keep at least one save folder")); return
-            self.cfg["games"][idx]["name"] = new_name
-            set_game_save_paths(self.cfg["games"][idx], new_paths)
-            set_game_monitor_processes(self.cfg["games"][idx], pe.get().strip())
-            clear_game_sync_state(self.cfg, old_game)
-            if old_game.get("save_path") and old_game.get("save_path") != self.cfg["games"][idx].get("save_path"):
-                exclude_recognition_path(self.cfg, old_game.get("appid", ""), old_game.get("name", ""), old_game.get("save_path", ""))
-            remember_recognition_path(self.cfg, self.cfg["games"][idx].get("appid", ""), new_name, self.cfg["games"][idx].get("save_path", ""))
-            self._invalidate_game_backup_count_cache()
-            save_config(self.cfg); self._refresh_games_list(); d.destroy()
-        ctk.CTkButton(d, text=self.bi("保存", "Save"), width=140, height=38, font=font(13, "bold"),
-                      corner_radius=10, fg_color=BTN_PRIMARY, hover_color=BTN_PRIMARY_H,
-                      command=_sv).grid(row=7, column=0, padx=24, pady=16)
+        self._game_form_dialog(idx=idx)
 
     def _delete_game(self, idx):
         g = self.cfg["games"][idx]
@@ -10268,7 +10285,7 @@ class SteamSaveManager(ctk.CTk):
              lambda: self._delete_game_from_detail(idx)),
         ]
         for i, (txt, clr, hclr, cmd) in enumerate(actions):
-            ctk.CTkButton(self._detail_btns, text=txt, height=36, width=100,
+            ctk.CTkButton(self._detail_btns, text=txt, height=36,
                           font=font(12, "bold"), corner_radius=8,
                           fg_color=clr, hover_color=hclr,
                           command=cmd).grid(row=0, column=i, padx=3, sticky="ew")
@@ -11389,7 +11406,7 @@ class SteamSaveManager(ctk.CTk):
             item["card"].pack_forget()
         if total_backups:
             for g in targets:
-                for b in get_backups(g, limit=end):
+                for b in self._get_game_backups_cached(g):
                     b["game"] = g["name"]
                     b["_game_ref"] = g
                     all_b.append(b)
@@ -11444,10 +11461,10 @@ class SteamSaveManager(ctk.CTk):
                                     fg_color=("#f1f5f9", "#252640"), corner_radius=12)
                 card.grid_columnconfigure(1, weight=1)
                 title = ctk.CTkLabel(card, text="", font=font(13, "bold"),
-                                     text_color=C_BODY_TEXT)
+                                     text_color=C_BODY_TEXT, wraplength=400)
                 title.grid(row=0, column=0, padx=14, pady=(10, 0), sticky="w")
                 info_label = ctk.CTkLabel(card, text="", font=font(11),
-                                          text_color=C_SUBTLE_TEXT)
+                                          text_color=C_SUBTLE_TEXT, wraplength=400)
                 info_label.grid(row=1, column=0, padx=14, pady=(0, 10), sticky="w")
                 bb = ctk.CTkFrame(card, fg_color="transparent")
                 bb.grid(row=0, column=1, rowspan=2, padx=14, pady=10, sticky="e")
@@ -11916,7 +11933,7 @@ class SteamSaveManager(ctk.CTk):
             command=self._on_sync_mode_change
         ).grid(row=12, column=0, padx=22, sticky="w")
         ctk.CTkLabel(automation, text=self.t("sync_hint"), font=font(11),
-                     text_color=C_SUBTLE_TEXT, wraplength=760,
+                     text_color=C_SUBTLE_TEXT, wraplength=680,
                      justify="left").grid(row=13, column=0, padx=22, pady=(6, 0), sticky="w")
 
         sync_keep_row = _row(automation)
