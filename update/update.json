@@ -1,6 +1,6 @@
 {
-  "version": "1.4.8",
-  "sha256": "c8f48426493a83c7a9e470b61244b84de98140298f76ca3357a621b4acdf9a3c",
-  "notes": "1. 游戏卡片中过长的存档路径不再被强制截断，改用自动换行显示，避免路径信息丢失\n2. 修复 Linux 系统下字体回退错误（原来写死为 macOS 专属字体 PingFang SC，Linux 现改用 WenQuanYi Micro Hei）\n3. 备份历史页面不再在 UI 线程中读取磁盘，改用内部缓存，解决滚动时可能卡顿的问题\n4. 执行备份/还原/删除操作期间，相关按钮现在会同步变为禁用状态，防止重复触发\n5. 修复设置页面提示文字在小窗口下被截断的问题\n6. 弹出对话框新增最大尺寸限制，防止在分辨率较低的屏幕上撑满全屏\n7. 游戏详情页操作按钮去掉固定宽度，可根据窗口宽度自适应拉伸\n8. 备份历史列表、首页最近备份中的游戏名称过长时自动换行，不再溢出卡片\n9. 搜索框占位文字移除了在部分旧版 Tk 上可能无法正常渲染的 🔍 emoji\n10. 「添加游戏」与「编辑游戏」对话框合并为统一实现，行为更一致",
-  "url": "https://github.com/Kiowx/save_manager/releases/download/v1.4.8/SteamSaveManager.exe"
+  "notes": "1. 增加响应式文本换行，优化首页、列表、详情页和设置页在小窗口与长文本下的显示。\n2. 扩展全局忙碌状态管理，减少备份、恢复、同步等操作重复触发。\n3. 扫描页新增进度条与取消按钮，取消扫描时保留已完成结果。\n4. 修复低可信扫描结果误显示为中可信的问题。\n5. 为扫描结果、游戏列表和详情页路径增加完整路径提示与右键复制。\n6. 将应用内信息、警告、错误和确认弹窗统一为 CustomTkinter 风格。\n7. 设置页新增分段跳转，并让路径输入框随窗口宽度伸缩。\n8. 语言切换时保留搜索与筛选状态。\n9. python -m py_compile main.py\n10. python -c \"import main; print(main.VERSION)\"",
+  "url": "https://github.com/Kiowx/save_manager/releases/download/v1.4.9/SteamSaveManager.exe",
+  "version": "1.4.9",
+  "sha256": "64f6e401057f2331f996b8f03af3298677a3a1efae87d659c0626bddc7b4dde5"
 }
