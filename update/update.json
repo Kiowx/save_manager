@@ -1,6 +1,6 @@
 {
-  "notes": "1. 增加响应式文本换行，优化首页、列表、详情页和设置页在小窗口与长文本下的显示。\n2. 扩展全局忙碌状态管理，减少备份、恢复、同步等操作重复触发。\n3. 扫描页新增进度条与取消按钮，取消扫描时保留已完成结果。\n4. 修复低可信扫描结果误显示为中可信的问题。\n5. 为扫描结果、游戏列表和详情页路径增加完整路径提示与右键复制。\n6. 将应用内信息、警告、错误和确认弹窗统一为 CustomTkinter 风格。\n7. 设置页新增分段跳转，并让路径输入框随窗口宽度伸缩。\n8. 语言切换时保留搜索与筛选状态。\n9. python -m py_compile main.py\n10. python -c \"import main; print(main.VERSION)\"",
-  "url": "https://github.com/Kiowx/save_manager/releases/download/v1.4.9/SteamSaveManager.exe",
-  "version": "1.4.9",
-  "sha256": "64f6e401057f2331f996b8f03af3298677a3a1efae87d659c0626bddc7b4dde5"
+  "version": "1.5.0",
+  "notes": "1. 将分散的 appinfo 全局变量封装为 _AppInfoCache 类，线程安全\n2. UFS 模板缓存改用 LRU 策略，限制最大缓存数量，避免内存无上限增长\n3. 将 ctypes/struct 等模块导入统一到文件顶部，移除重复的局部导入",
+  "url": "https://github.com/Kiowx/save_manager/releases/download/v1.5.0/SteamSaveManager.exe",
+  "sha256": "ef4f2bc0cebf80c36bfe61ad921e6f60cdfe30efdd23360b03eeef9b0f6ee5e5"
 }
