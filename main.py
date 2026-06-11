@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Steam 游戏存档备份管理器 v1.4.9 — 通用版"""
+"""Steam 游戏存档备份管理器 v1.5.0 — 通用版"""
 
 import os
 import sys
@@ -20,6 +20,8 @@ import queue
 import time
 import tempfile
 import locale
+import struct
+import ctypes
 import subprocess
 import urllib.request
 import urllib.error
@@ -31,6 +33,7 @@ import weakref
 import uuid
 from pathlib import Path, PurePosixPath
 from typing import Any, Optional
+from collections import OrderedDict
 
 try:
     import winreg
@@ -101,7 +104,7 @@ except ImportError as exc:
 # ══════════════════════════════════════════════
 
 APP_NAME = "Steam Save Manager"
-VERSION = "1.4.9"
+VERSION = "1.5.0"
 APP_DIR = Path(os.path.dirname(os.path.abspath(sys.argv[0])))
 LEGACY_CONFIG_DIR = Path.home() / ".steam_save_manager"
 STARTUP_AUTOSTART_FLAG = "--startup-launch"
@@ -468,7 +471,6 @@ def clamp_int(value, default: int, min_value: int, max_value: int) -> int:
 def detect_system_language() -> str:
     if sys.platform == "win32":
         try:
-            import ctypes
             lang_id = ctypes.windll.kernel32.GetUserDefaultUILanguage()
             code = locale.windows_locale.get(lang_id, "")
             return normalize_language(code)
@@ -1340,7 +1342,7 @@ def scan_installed_games(steam_path: str) -> list[dict]:
                 if appid in _NON_GAME_APPIDS:
                     continue
                 # 通过 appinfo.vdf 的 common.type 过滤非游戏应用（最可靠）
-                app_type = _APPINFO_TYPE_MAP.get(appid, "")
+                app_type = _APPINFO_CACHE.get_app_type(appid)
                 if app_type and app_type not in _APPINFO_GAME_TYPES:
                     continue
                 # 通过名称模式过滤常见的非游戏应用（兜底，处理 appinfo 未覆盖的情况）
@@ -1391,9 +1393,6 @@ def classify_storage_path(path: str) -> str:
             _STORAGE_KIND_CACHE[root] = "unknown"
         return "unknown"
     try:
-        import ctypes
-        import struct
-
         kernel32 = ctypes.windll.kernel32
         kernel32.GetDriveTypeW.argtypes = [ctypes.c_wchar_p]
         kernel32.GetDriveTypeW.restype = ctypes.c_uint
@@ -1670,17 +1669,133 @@ _SAVE_DETECTION_CACHE: dict[str, list[dict]] = {}
 _SAVE_DETECTION_CACHE_LOCK = threading.Lock()
 _STEAMDB_UFS_CACHE: dict[str, list[str]] = {}
 _STEAMDB_UFS_ENTRY_CACHE: dict[str, list[dict]] = {}
-_APPINFO_UFS_CACHE: dict[str, list[dict]] = {}
-_APPINFO_UFS_CACHE_LOCK = threading.Lock()
-_APPINFO_LOADED = False
-_APPINFO_LOADED_PATH = ""
-_APPINFO_DATA: dict[str, list[dict]] = {}
-_APPINFO_DATA_LOCK = threading.Lock()
 _INSTALLED_GAME_INFO_CACHE: dict[str, dict[str, dict]] = {}
 _INSTALLED_GAME_INFO_CACHE_LOCK = threading.Lock()
 
 
-_APPINFO_TYPE_MAP: dict[str, str] = {}  # appid -> app type ("Game", "Tool", "DLC", etc.)
+class _AppInfoCache:
+    """封装 appinfo.vdf 的解析与缓存，替代分散的 _APPINFO_* 全局状态。
+
+    - ``_data`` / ``_type_map``：整份 appinfo.vdf 的单次快照，按 steam_path 失效重载。
+    - ``_ufs_cache``：按 appid 派生的 UFS 模板，使用 LRU 控制内存上限。
+    所有公开方法均在内部锁保护下访问，线程安全。
+    """
+
+    UFS_CACHE_MAX = 512
+
+    def __init__(self):
+        self._lock = threading.RLock()
+        self._loaded = False
+        self._loaded_path = ""
+        self._data: dict[str, list[dict]] = {}          # appid -> savefiles 规格
+        self._type_map: dict[str, str] = {}             # appid -> app type
+        self._ufs_cache: "OrderedDict[str, list[dict]]" = OrderedDict()
+
+    def ensure_loaded(self, steam_path: str) -> None:
+        """确保指定 Steam 路径的 appinfo.vdf 已解析到缓存（按路径幂等）。"""
+        normalized = os.path.normpath(steam_path) if steam_path else ""
+        with self._lock:
+            if self._loaded and normalized == self._loaded_path:
+                return
+            self._data = {}
+            self._type_map = {}
+            self._ufs_cache.clear()
+            self._loaded = True
+            self._loaded_path = normalized
+            self._parse(steam_path)
+
+    def reset(self) -> None:
+        """清空全部缓存并标记为未加载，下次访问时重新解析。"""
+        with self._lock:
+            self._loaded = False
+            self._loaded_path = ""
+            self._data = {}
+            self._type_map = {}
+            self._ufs_cache.clear()
+
+    def get_app_type(self, appid: str) -> str:
+        with self._lock:
+            return self._type_map.get(str(appid), "")
+
+    def get_savefiles(self, appid: str) -> list[dict]:
+        with self._lock:
+            return self._data.get(str(appid), [])
+
+    def get_ufs_templates(self, appid: str) -> Optional[list[dict]]:
+        """返回缓存的 UFS 模板副本；未命中返回 None。命中时刷新 LRU 顺序。"""
+        with self._lock:
+            cached = self._ufs_cache.get(appid)
+            if cached is None:
+                return None
+            self._ufs_cache.move_to_end(appid)
+            return list(cached)
+
+    def store_ufs_templates(self, appid: str, templates: list[dict]) -> None:
+        """写入 UFS 模板并按 LRU 上限淘汰最旧条目。"""
+        with self._lock:
+            self._ufs_cache[appid] = templates
+            self._ufs_cache.move_to_end(appid)
+            while len(self._ufs_cache) > self.UFS_CACHE_MAX:
+                self._ufs_cache.popitem(last=False)
+
+    def _parse(self, steam_path: str) -> None:
+        """解析 appinfo.vdf 二进制文件，提取 UFS savefiles 与 common.type。
+
+        格式: magic(4B) + universe(4B) + records...
+        每条记录: appid(4B LE) + size(4B LE) + ... + binary KV data + 0x00 sentinel
+        appinfo.vdf v28/v29 格式（Steam 2024+）：
+          header: magic(4B) + universe(4B)
+          record: appid(4B) + size(4B) + state(4B) + last_updated(4B) + token(8B)
+                  + sha1(20B) + change_number(4B) + sha1_2(20B) + binary_kv_data
+        """
+        appinfo_path = os.path.join(steam_path, "appcache", "appinfo.vdf")
+        if not os.path.isfile(appinfo_path):
+            return
+        try:
+            with open(appinfo_path, "rb") as f:
+                data = f.read()
+
+            if len(data) < 8:
+                return
+            magic = struct.unpack_from("<I", data, 0)[0]
+            # Magic: 0x07564428 (v28) or 0x07564429 (v29)
+            if magic not in (0x07564428, 0x07564429):
+                return
+
+            pos = 8  # skip magic + universe
+            while pos + 4 <= len(data):
+                appid = struct.unpack_from("<I", data, pos)[0]
+                if appid == 0:
+                    break
+                pos += 4
+                if pos + 4 > len(data):
+                    break
+                size = struct.unpack_from("<I", data, pos)[0]
+                pos += 4
+                if pos + size > len(data):
+                    break
+                record_data = data[pos:pos + size]
+                pos += size
+
+                # 提取 app type（快速字节搜索，开销极低）
+                app_type = _extract_app_type_fast(record_data)
+                if app_type:
+                    self._type_map[str(appid)] = app_type
+
+                # 快速检查：只处理包含 "savefiles" 的记录
+                if b"savefiles" not in record_data:
+                    continue
+
+                # 从二进制 KV 数据中提取 UFS savefiles
+                savefiles = _extract_ufs_savefiles(record_data)
+                if savefiles:
+                    self._data[str(appid)] = savefiles
+            del data  # 释放可能 30-80 MB 的 appinfo.vdf 内存
+        except Exception:
+            pass
+
+
+_APPINFO_CACHE = _AppInfoCache()
 
 
 def _extract_app_type_fast(record_data: bytes) -> str:
@@ -1730,73 +1845,8 @@ def _extract_app_type_fast(record_data: bytes) -> str:
 
 
 def _load_appinfo_vdf(steam_path: str):
-    """
-    解析 Steam appinfo.vdf 二进制文件，提取每个 appid 的 UFS savefiles 配置。
-    同时提取 common.type 字段用于区分游戏/工具/DLC 等应用类型。
-    格式: magic(4B) + universe(4B) + records...
-    每条记录: appid(4B LE) + size(4B LE) + ... + binary KV data + 0x00 sentinel
-    appinfo.vdf v28/v29 格式（Steam 2024+）：
-      header: magic(4B) + universe(4B)
-      record: appid(4B) + size(4B) + state(4B) + last_updated(4B) + token(8B)
-              + sha1(20B) + change_number(4B) + sha1_2(20B) + binary_kv_data
-    """
-    global _APPINFO_LOADED, _APPINFO_DATA, _APPINFO_UFS_CACHE, _APPINFO_LOADED_PATH, _APPINFO_TYPE_MAP
-    normalized_steam_path = os.path.normpath(steam_path) if steam_path else ""
-    if _APPINFO_LOADED and normalized_steam_path == _APPINFO_LOADED_PATH:
-        return
-    _APPINFO_DATA = {}
-    _APPINFO_UFS_CACHE.clear()
-    _APPINFO_TYPE_MAP = {}
-    _APPINFO_LOADED = True
-    _APPINFO_LOADED_PATH = normalized_steam_path
-
-    appinfo_path = os.path.join(steam_path, "appcache", "appinfo.vdf")
-    if not os.path.isfile(appinfo_path):
-        return
-
-    try:
-        import struct
-        with open(appinfo_path, "rb") as f:
-            data = f.read()
-
-        if len(data) < 8:
-            return
-        magic = struct.unpack_from("<I", data, 0)[0]
-        # Magic: 0x07564428 (v28) or 0x07564429 (v29)
-        if magic not in (0x07564428, 0x07564429):
-            return
-
-        pos = 8  # skip magic + universe
-        while pos + 4 <= len(data):
-            appid = struct.unpack_from("<I", data, pos)[0]
-            if appid == 0:
-                break
-            pos += 4
-            if pos + 4 > len(data):
-                break
-            size = struct.unpack_from("<I", data, pos)[0]
-            pos += 4
-            if pos + size > len(data):
-                break
-            record_data = data[pos:pos + size]
-            pos += size
-
-            # 提取 app type（快速字节搜索，开销极低）
-            app_type = _extract_app_type_fast(record_data)
-            if app_type:
-                _APPINFO_TYPE_MAP[str(appid)] = app_type
-
-            # 快速检查：只处理包含 "savefiles" 的记录
-            if b"savefiles" not in record_data:
-                continue
-
-            # 从二进制 KV 数据中提取 UFS savefiles
-            savefiles = _extract_ufs_savefiles(record_data)
-            if savefiles:
-                _APPINFO_DATA[str(appid)] = savefiles
-        del data  # 释放可能 30-80 MB 的 appinfo.vdf 内存
-    except Exception:
-        pass
+    """兼容旧调用：确保指定路径的 appinfo.vdf 已解析到全局缓存。"""
+    _APPINFO_CACHE.ensure_loaded(steam_path)
 
 
 def _extract_ufs_savefiles(record_data: bytes) -> list[dict]:
@@ -1868,7 +1918,6 @@ def _extract_ufs_savefiles(record_data: bytes) -> list[dict]:
                     val = read_string()
                     collected[key] = val
                 elif vtype == 0x02:  # int32
-                    import struct
                     if pos[0] + 4 <= len(kv_data):
                         val = struct.unpack_from("<i", kv_data, pos[0])[0]
                         collected[key] = val
@@ -1892,7 +1941,6 @@ def _extract_ufs_savefiles(record_data: bytes) -> list[dict]:
                 if vtype == 0x01:
                     entry[key] = read_string()
                 elif vtype == 0x02:
-                    import struct
                     if pos[0] + 4 <= len(kv_data):
                         entry[key] = struct.unpack_from("<i", kv_data, pos[0])[0]
                     pos[0] += 4
@@ -2024,14 +2072,13 @@ def parse_appinfo_ufs_entries(steam_path: str, appid: str) -> list[dict]:
     if not appid or not steam_path:
         return []
 
-    with _APPINFO_UFS_CACHE_LOCK:
-        cached = _APPINFO_UFS_CACHE.get(appid)
-        if cached is not None:
-            return list(cached)
+    cached = _APPINFO_CACHE.get_ufs_templates(appid)
+    if cached is not None:
+        return cached
 
-    _load_appinfo_vdf(steam_path)
+    _APPINFO_CACHE.ensure_loaded(steam_path)
 
-    savefiles = _APPINFO_DATA.get(appid, [])
+    savefiles = _APPINFO_CACHE.get_savefiles(appid)
     templates = []
     seen = set()
     for entry in savefiles:
@@ -2078,8 +2125,7 @@ def parse_appinfo_ufs_entries(steam_path: str, appid: str) -> list[dict]:
                 "recursive": recursive,
             })
 
-    with _APPINFO_UFS_CACHE_LOCK:
-        _APPINFO_UFS_CACHE[appid] = templates
+    _APPINFO_CACHE.store_ufs_templates(appid, templates)
     return list(templates)
 
 
@@ -4212,7 +4258,7 @@ class batch_config_save:
 
 
 def clear_startup_caches(cfg: Optional[dict] = None):
-    global _STEAM_AUTOCLOUD_CACHE, _APPINFO_LOADED, _APPINFO_DATA, _APPINFO_LOADED_PATH, _INSTALLED_GAME_INFO_CACHE, _APPINFO_TYPE_MAP
+    global _STEAM_AUTOCLOUD_CACHE, _INSTALLED_GAME_INFO_CACHE
 
     _STEAM_AUTOCLOUD_CACHE = None
     with _STORAGE_KIND_CACHE_LOCK:
@@ -4221,12 +4267,7 @@ def clear_startup_caches(cfg: Optional[dict] = None):
         _SAVE_DETECTION_CACHE.clear()
     _STEAMDB_UFS_CACHE.clear()
     _STEAMDB_UFS_ENTRY_CACHE.clear()
-    with _APPINFO_UFS_CACHE_LOCK:
-        _APPINFO_UFS_CACHE.clear()
-    _APPINFO_LOADED = False
-    _APPINFO_LOADED_PATH = ""
-    _APPINFO_DATA = {}
-    _APPINFO_TYPE_MAP = {}
+    _APPINFO_CACHE.reset()
     with _INSTALLED_GAME_INFO_CACHE_LOCK:
         _INSTALLED_GAME_INFO_CACHE.clear()
     with _REGISTRY_INSTALL_CACHE_LOCK:
