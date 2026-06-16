@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Steam 游戏存档备份管理器 v1.5.0 — 通用版"""
+"""Steam 游戏存档备份管理器 v1.5.1 — 通用版"""
 
 import os
 import sys
@@ -104,7 +104,7 @@ except ImportError as exc:
 # ══════════════════════════════════════════════
 
 APP_NAME = "Steam Save Manager"
-VERSION = "1.5.0"
+VERSION = "1.5.1"
 APP_DIR = Path(os.path.dirname(os.path.abspath(sys.argv[0])))
 LEGACY_CONFIG_DIR = Path.home() / ".steam_save_manager"
 STARTUP_AUTOSTART_FLAG = "--startup-launch"
@@ -186,6 +186,13 @@ ZIP_EXTRACT_MAX_FILES = 200_000
 ZIP_EXTRACT_MAX_MEMBER_BYTES = 10 * 1024 * 1024 * 1024
 ZIP_EXTRACT_MAX_TOTAL_BYTES = 20 * 1024 * 1024 * 1024
 RESTORE_SAFETY_KEEP_PER_TARGET = 3
+LOCAL_CLOUD_REFRESH_TIMEOUT = 6.0
+LOCAL_CLOUD_MISSING_PAYLOAD_TIMEOUT = 18.0
+LOCAL_CLOUD_REFRESH_INTERVAL = 0.75
+
+
+class SyncPendingError(RuntimeError):
+    """Raised for non-fatal sync states that should be retried later."""
 
 SUPPORTED_LANGUAGES = ("zh-CN", "en")
 LANGUAGE_NAMES = {
@@ -4620,6 +4627,37 @@ def get_sync_archive_meta_path(archive_path: Path) -> Path:
     return Path(str(archive_path) + ".meta.json")
 
 
+def _safe_file_stat(path: Path | str):
+    try:
+        return Path(path).stat()
+    except Exception as e:
+        logger.debug("无法读取文件状态 %s: %s", path, e)
+        return None
+
+
+def _iter_local_sync_archives(archive_root: Path) -> list[Path]:
+    try:
+        candidates = list(archive_root.rglob("*.zip"))
+    except Exception as e:
+        logger.debug("扫描同步归档目录失败 %s: %s", archive_root, e)
+        return []
+    archives = []
+    for candidate in candidates:
+        try:
+            if candidate.is_dir():
+                continue
+        except Exception:
+            pass
+        archives.append(candidate)
+    return archives
+
+
+def _sync_archive_sort_key(path: Path) -> tuple:
+    st = _safe_file_stat(path)
+    mtime = float(st.st_mtime) if st else 0.0
+    return (mtime, path.name.lower())
+
+
 def compute_file_sha256(file_path: Path | str) -> str:
     hasher = hashlib.sha256()
     with open(file_path, "rb") as fh:
@@ -4672,8 +4710,8 @@ def enforce_sync_archive_limits(sync_game_dir: Path, keep_count: int = 3):
     if not archive_root.is_dir():
         return
     archives = sorted(
-        archive_root.rglob("*.zip"),
-        key=lambda p: (p.stat().st_mtime, p.name.lower()),
+        _iter_local_sync_archives(archive_root),
+        key=_sync_archive_sort_key,
         reverse=True,
     )
     for archive_path in archives[keep_count:]:
@@ -4825,7 +4863,10 @@ def create_sync_archive(game: dict, sync_game_dir: Path,
     meta_path = get_sync_archive_meta_path(archive_path)
     with open(meta_path, "w", encoding="utf-8") as f:
         json.dump(meta, f, ensure_ascii=False, indent=2)
-    enforce_sync_archive_limits(sync_game_dir, keep_count)
+    try:
+        enforce_sync_archive_limits(sync_game_dir, keep_count)
+    except Exception as e:
+        logger.debug("清理旧同步归档失败 %s: %s", sync_game_dir, e)
     return archive_path, meta_path
 
 
@@ -4834,8 +4875,8 @@ def get_latest_sync_archive(sync_game_dir: Path) -> Optional[dict]:
     if not archive_root.is_dir():
         return None
     archives = sorted(
-        archive_root.rglob("*.zip"),
-        key=lambda p: (p.stat().st_mtime, p.name.lower()),
+        _iter_local_sync_archives(archive_root),
+        key=_sync_archive_sort_key,
         reverse=True,
     )
     for archive_path in archives:
@@ -4846,16 +4887,21 @@ def get_latest_sync_archive(sync_game_dir: Path) -> Optional[dict]:
                 meta = load_json_file_tolerant(meta_path, default={}) or {}
             except Exception:
                 meta = {}
+        st = _safe_file_stat(archive_path)
+        archive_size = int(meta.get("archive_size", 0) or 0)
+        if not archive_size and st:
+            archive_size = int(st.st_size)
+        archive_mtime = float(st.st_mtime) if st else 0.0
         return {
             "kind": "archive",
             "archive_path": archive_path,
             "meta_path": meta_path if meta_path.exists() else None,
             "hash": str(meta.get("hash", "") or ""),
-            "archive_size": int(meta.get("archive_size", archive_path.stat().st_size) or 0),
+            "archive_size": archive_size,
             "archive_sha256": str(meta.get("archive_sha256", "") or "").lower(),
             "file_count": int(meta.get("file_count", 0) or 0),
             "latest_mtime": float(meta.get("latest_mtime", 0.0) or 0.0),
-            "timestamp": float(meta.get("timestamp", archive_path.stat().st_mtime)),
+            "timestamp": float(meta.get("timestamp", archive_mtime) or archive_mtime),
             "path_count": int(meta.get("path_count", 1) or 1),
             "paths": meta.get("paths", []),
         }
@@ -4923,7 +4969,8 @@ def _poke_cloud_sync_folder(sync_root: str):
 
 def refresh_local_sync_payload(sync_root: str, sync_game_dir: Path, path_count: int,
                                current_payload: Optional[dict] = None,
-                               timeout: float = 6.0, interval: float = 0.75) -> Optional[dict]:
+                               timeout: float = LOCAL_CLOUD_REFRESH_TIMEOUT,
+                               interval: float = LOCAL_CLOUD_REFRESH_INTERVAL) -> Optional[dict]:
     if not sync_root or not os.path.isdir(sync_root):
         return current_payload if current_payload is not None else get_remote_sync_payload(sync_game_dir, path_count)
     baseline = current_payload if current_payload is not None else get_remote_sync_payload(sync_game_dir, path_count)
@@ -6129,12 +6176,26 @@ def run_sync_retries(cfg: Optional[dict], sync_folder: str,
                     f"↻ Retried {game['name']} ({mode}): {result}",
                 ))
             changed = True
+        except SyncPendingError as e:
+            item = dict(item)
+            item["reason"] = str(e)
+            item["attempts"] = int(item.get("attempts", 0)) + 1
+            item["updated_at"] = datetime.datetime.now().isoformat(timespec="seconds")
+            keep.append(item)
+            changed = True
+            if log_cb:
+                log_cb(bilingual_cfg(
+                    cfg,
+                    f"⏳ 等待云盘同步 {game['name']} ({mode}): {e}",
+                    f"⏳ Waiting for cloud sync for {game['name']} ({mode}): {e}",
+                ))
         except Exception as e:
             item = dict(item)
             item["reason"] = str(e)
             item["attempts"] = int(item.get("attempts", 0)) + 1
             item["updated_at"] = datetime.datetime.now().isoformat(timespec="seconds")
             keep.append(item)
+            changed = True
             if log_cb:
                 log_cb(bilingual_cfg(
                     cfg,
@@ -6308,7 +6369,8 @@ def _sync_game_save_impl(game: dict, sync_folder: str, mode: str = "smart",
     should_refresh_local_mirror = (
         not using_webdav_cache
         and mode in {"download", "bidirectional"}
-        and (not remote_payload or local_hash == remote_hash)
+        and remote_payload
+        and local_hash == remote_hash
     )
     if should_refresh_local_mirror:
         refreshed_payload = refresh_local_sync_payload(
@@ -6320,6 +6382,25 @@ def _sync_game_save_impl(game: dict, sync_folder: str, mode: str = "smart",
         if _remote_sync_payload_signature(refreshed_payload) != _remote_sync_payload_signature(remote_payload):
             remote_payload = refreshed_payload
             remote_hash, remote_count, remote_label, remote_info = _build_remote_state(remote_payload)
+
+    should_wait_for_cloud_payload = (
+        not using_webdav_cache
+        and mode in {"download", "bidirectional"}
+        and remote_count == 0
+    )
+    if should_wait_for_cloud_payload:
+        refreshed_payload = refresh_local_sync_payload(
+            effective_sync_root,
+            dest_dir,
+            len(configured_paths),
+            current_payload=remote_payload,
+            timeout=LOCAL_CLOUD_MISSING_PAYLOAD_TIMEOUT,
+            interval=LOCAL_CLOUD_REFRESH_INTERVAL,
+        )
+        if _remote_sync_payload_signature(refreshed_payload) != _remote_sync_payload_signature(remote_payload):
+            remote_payload = refreshed_payload
+            remote_hash, remote_count, remote_label, remote_info = _build_remote_state(remote_payload)
+
     def _mirror(src: str, dst: str):
         """将 src 目录完整镜像到 dst（兼容 OneDrive/Dropbox 等云盘锁定）"""
         dst_p = Path(dst)
@@ -6453,7 +6534,14 @@ def _sync_game_save_impl(game: dict, sync_folder: str, mode: str = "smart",
         ))
     if mode == "download":
         if remote_count == 0:
-            return bilingual_text(lang, "跳过：同步文件夹中无存档", "Skipped: no save files were found in the sync folder")
+            pending_message = bilingual_text(
+                lang,
+                "等待：本地同步文件夹尚未出现云端 ZIP，已请求云盘客户端刷新",
+                "Waiting: the cloud ZIP is not available locally yet; requested the sync client to refresh",
+            )
+            if auto and not using_webdav_cache:
+                raise SyncPendingError(pending_message)
+            return pending_message
         if local_hash == remote_hash:
             _record_current()
             return bilingual_text(lang, "跳过：本地与同步文件夹已一致", "Skipped: local and sync folders are already identical")
@@ -6556,6 +6644,10 @@ def sync_all_games(cfg: dict, auto: bool = False) -> list[tuple[str, str]]:
             continue
         try:
             r = sync_game_save(g, sf, mode, auto=auto, cfg=cfg)
+        except SyncPendingError as e:
+            r = str(e)
+            if auto and mode in ("upload", "download"):
+                enqueue_sync_retry(cfg, g, mode, str(e))
         except Exception as e:
             r = bilingual_cfg(
                 cfg,
@@ -7735,6 +7827,14 @@ class GameProcessMonitor:
                                 bilingual_cfg(self.cfg, "存档管家 · 初始同步", "Steam Save Manager · Initial Sync"),
                                 bilingual_cfg(self.cfg, f"「{g['name']}」{r}", f"{g['name']}: {r}"),
                             )
+                    except SyncPendingError as e:
+                        enqueue_sync_retry(self.cfg, g, "download", str(e))
+                        _ts2 = datetime.datetime.now().strftime("%H:%M:%S")
+                        self.sync_log.append(f"[{_ts2}] " + bilingual_cfg(
+                            self.cfg,
+                            f"⏳ {g['name']} 初始下载等待云盘同步: {e}",
+                            f"⏳ Initial download for {g['name']} is waiting for cloud sync: {e}",
+                        ))
                     except Exception as e:
                         enqueue_sync_retry(self.cfg, g, "download", str(e))
                         _ts2 = datetime.datetime.now().strftime("%H:%M:%S")
@@ -7802,6 +7902,13 @@ class GameProcessMonitor:
                                 bilingual_cfg(self.cfg, "存档管家 · 云存档下载", "Steam Save Manager · Cloud Save Download"),
                                 bilingual_cfg(self.cfg, f"「{g['name']}」{r}", f"{g['name']}: {r}"),
                             )
+                    except SyncPendingError as e:
+                        enqueue_sync_retry(self.cfg, g, "download", str(e))
+                        self.sync_log.append(f"[{_ts}] " + bilingual_cfg(
+                            self.cfg,
+                            f"⏳ {g['name']} 下载等待云盘同步: {e}",
+                            f"⏳ Download for {g['name']} is waiting for cloud sync: {e}",
+                        ))
                     except Exception as e:
                         enqueue_sync_retry(self.cfg, g, "download", str(e))
                         self.sync_log.append(f"[{_ts}] " + bilingual_cfg(
