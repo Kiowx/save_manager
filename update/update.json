@@ -1,6 +1,6 @@
 {
-  "version": "1.5.0",
-  "notes": "1. 将分散的 appinfo 全局变量封装为 _AppInfoCache 类，线程安全\n2. UFS 模板缓存改用 LRU 策略，限制最大缓存数量，避免内存无上限增长\n3. 将 ctypes/struct 等模块导入统一到文件顶部，移除重复的局部导入",
-  "url": "https://github.com/Kiowx/save_manager/releases/download/v1.5.0/SteamSaveManager.exe",
-  "sha256": "ef4f2bc0cebf80c36bfe61ad921e6f60cdfe30efdd23360b03eeef9b0f6ee5e5"
+  "version": "1.5.1",
+  "sha256": "7ab67dffd8cf1131422d6bc7cac1a6615b3e70484b26f6aca5e3cd69d57298ca",
+  "url": "https://github.com/Kiowx/save_manager/releases/download/v1.5.1/SteamSaveManager.exe",
+  "notes": "1. 修复云同步在旧存档未清理干净时上传失败的问题；云盘文件尚未同步到本机时会等待并自动重试，换设备后更容易自动拉回存档；同时优化 Steam 存档配置缓存。\n2. ----\n3. Fixed cloud sync uploads failing when old archives could not be cleaned up; the app now waits and retries when cloud files have not synced locally yet, making saves easier to pull back on another PC; also improved Steam save config caching."
 }
