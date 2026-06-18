@@ -1,6 +1,6 @@
 {
-  "version": "1.5.1",
-  "sha256": "7ab67dffd8cf1131422d6bc7cac1a6615b3e70484b26f6aca5e3cd69d57298ca",
-  "url": "https://github.com/Kiowx/save_manager/releases/download/v1.5.1/SteamSaveManager.exe",
-  "notes": "1. 修复云同步在旧存档未清理干净时上传失败的问题；云盘文件尚未同步到本机时会等待并自动重试，换设备后更容易自动拉回存档；同时优化 Steam 存档配置缓存。\n2. ----\n3. Fixed cloud sync uploads failing when old archives could not be cleaned up; the app now waits and retries when cloud files have not synced locally yet, making saves easier to pull back on another PC; also improved Steam save config caching."
+  "sha256": "38b2acde97e016aba12c27e6a73755918803f8a74d8ce2c35a006b66beed07ff",
+  "notes": "1. 修复自动双向同步在本地已有存档时误等空云端的问题。\n2. 云端 ZIP 还是占位或未下载完整时会等待并自动重试，避免直接报坏包。\n3. 手动下载遇到云端为空时恢复为清晰的跳过提示。\n4. Fixed automatic bidirectional sync waiting on an empty cloud side when local saves already exist.\n5. Wait and retry when a cloud ZIP is still a placeholder or not fully downloaded, avoiding bad-archive errors.\n6. Restored a clear skip message for manual downloads when no cloud save exists.",
+  "version": "1.5.2",
+  "url": "https://github.com/Kiowx/save_manager/releases/download/v1.5.2/SteamSaveManager.exe"
 }
