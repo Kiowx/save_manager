@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Steam 游戏存档备份管理器 v1.5.1 — 通用版"""
+"""Steam 游戏存档备份管理器 v1.5.2 — 通用版"""
 
 import os
 import sys
@@ -104,7 +104,7 @@ except ImportError as exc:
 # ══════════════════════════════════════════════
 
 APP_NAME = "Steam Save Manager"
-VERSION = "1.5.1"
+VERSION = "1.5.2"
 APP_DIR = Path(os.path.dirname(os.path.abspath(sys.argv[0])))
 LEGACY_CONFIG_DIR = Path.home() / ".steam_save_manager"
 STARTUP_AUTOSTART_FLAG = "--startup-launch"
@@ -6385,8 +6385,9 @@ def _sync_game_save_impl(game: dict, sync_folder: str, mode: str = "smart",
 
     should_wait_for_cloud_payload = (
         not using_webdav_cache
-        and mode in {"download", "bidirectional"}
+        and auto
         and remote_count == 0
+        and not (mode == "bidirectional" and local_count > 0)
     )
     if should_wait_for_cloud_payload:
         refreshed_payload = refresh_local_sync_payload(
@@ -6400,6 +6401,35 @@ def _sync_game_save_impl(game: dict, sync_folder: str, mode: str = "smart",
         if _remote_sync_payload_signature(refreshed_payload) != _remote_sync_payload_signature(remote_payload):
             remote_payload = refreshed_payload
             remote_hash, remote_count, remote_label, remote_info = _build_remote_state(remote_payload)
+
+    # 预检：远端是 ZIP 归档但本地副本无效（云盘占位文件尚未同步完整）时，
+    # 触发云盘刷新并等待；仍无效则按 auto 决定重试或返回友好提示，
+    # 避免 extract_sync_archive 直接抛 BadZipFile。
+    if (not using_webdav_cache
+            and remote_payload
+            and remote_payload.get("kind") == "archive"
+            and mode in {"download", "bidirectional"}
+            and local_hash != remote_hash):
+        archive_path = Path(remote_payload["archive_path"])
+        ok, zip_msg = validate_zip_archive(archive_path)
+        if not ok and effective_sync_root and os.path.isdir(effective_sync_root):
+            _poke_cloud_sync_folder(effective_sync_root)
+            wait_timeout = LOCAL_CLOUD_MISSING_PAYLOAD_TIMEOUT if auto else LOCAL_CLOUD_REFRESH_TIMEOUT
+            deadline = time.time() + max(0.0, wait_timeout)
+            while time.time() < deadline:
+                time.sleep(LOCAL_CLOUD_REFRESH_INTERVAL)
+                ok, zip_msg = validate_zip_archive(archive_path)
+                if ok:
+                    break
+            if not ok:
+                not_ready_msg = bilingual_text(
+                    lang,
+                    f"等待：云端存档尚未完整同步到本机，请稍后重试（{zip_msg}）",
+                    f"Waiting: the cloud save has not fully synced locally yet, please retry later ({zip_msg})",
+                )
+                if auto and not using_webdav_cache:
+                    raise SyncPendingError(not_ready_msg)
+                return not_ready_msg
 
     def _mirror(src: str, dst: str):
         """将 src 目录完整镜像到 dst（兼容 OneDrive/Dropbox 等云盘锁定）"""
@@ -6541,7 +6571,11 @@ def _sync_game_save_impl(game: dict, sync_folder: str, mode: str = "smart",
             )
             if auto and not using_webdav_cache:
                 raise SyncPendingError(pending_message)
-            return pending_message
+            return bilingual_text(
+                lang,
+                "跳过：同步文件夹中无存档",
+                "Skipped: no save files were found in the sync folder",
+            )
         if local_hash == remote_hash:
             _record_current()
             return bilingual_text(lang, "跳过：本地与同步文件夹已一致", "Skipped: local and sync folders are already identical")
