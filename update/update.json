@@ -1,6 +1,6 @@
 {
-  "sha256": "38b2acde97e016aba12c27e6a73755918803f8a74d8ce2c35a006b66beed07ff",
-  "notes": "1. 修复自动双向同步在本地已有存档时误等空云端的问题。\n2. 云端 ZIP 还是占位或未下载完整时会等待并自动重试，避免直接报坏包。\n3. 手动下载遇到云端为空时恢复为清晰的跳过提示。\n4. Fixed automatic bidirectional sync waiting on an empty cloud side when local saves already exist.\n5. Wait and retry when a cloud ZIP is still a placeholder or not fully downloaded, avoiding bad-archive errors.\n6. Restored a clear skip message for manual downloads when no cloud save exists.",
-  "version": "1.5.2",
-  "url": "https://github.com/Kiowx/save_manager/releases/download/v1.5.2/SteamSaveManager.exe"
+  "sha256": "b430100b264c611e9f3469cf7989ba6c5b899442aea455a0bcbe410942ce505b",
+  "url": "https://github.com/Kiowx/save_manager/releases/download/v1.5.3/SteamSaveManager.exe",
+  "version": "1.5.3",
+  "notes": "1. 存档路径支持 %USERPROFILE%、%APPDATA%、%LOCALAPPDATA% 等变量，换电脑后会自动指向新系统位置。\n2. 旧的用户目录绝对路径会自动转换为变量路径，列表、详情和编辑窗口都会显示可迁移路径。\n3. 备份、同步、监控和导入恢复会在执行时自动展开变量，不影响原有使用。\n4. Save paths now support variables like %USERPROFILE%, %APPDATA%, and %LOCALAPPDATA%, so they can follow the new PC's folders.\n5. Existing absolute paths under user folders are converted to portable variable paths and shown that way in the UI.\n6. Backup, sync, monitoring, and restore flows expand variables at runtime without changing existing behavior."
 }
