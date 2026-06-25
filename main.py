@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Steam 游戏存档备份管理器 v1.5.2 — 通用版"""
+"""Steam 游戏存档备份管理器 v1.5.3 — 通用版"""
 
 import os
 import sys
@@ -104,7 +104,7 @@ except ImportError as exc:
 # ══════════════════════════════════════════════
 
 APP_NAME = "Steam Save Manager"
-VERSION = "1.5.2"
+VERSION = "1.5.3"
 APP_DIR = Path(os.path.dirname(os.path.abspath(sys.argv[0])))
 LEGACY_CONFIG_DIR = Path.home() / ".steam_save_manager"
 STARTUP_AUTOSTART_FLAG = "--startup-launch"
@@ -2155,6 +2155,84 @@ def expand_path(template: str, install_dir: str = "") -> str:
             .replace("{INSTALL}", install_dir if install_dir else "__NO_INSTALL__"))
 
 
+SAVE_PATH_VAR_ROOTS = (
+    ("%APPDATA%", APPDATA),
+    ("%LOCALAPPDATA%", LOCAL_APPDATA),
+    ("%LOCALLOW%", LOCAL_LOW),
+    ("%USERPROFILE%\\Documents", DOCUMENTS),
+    ("%USERPROFILE%\\Saved Games", SAVED_GAMES),
+    ("%USERPROFILE%", USER_HOME),
+    ("%PUBLIC%", PUBLIC_HOME),
+    ("%PROGRAMDATA%", PROGRAMDATA),
+)
+
+SAVE_PATH_VAR_ALIASES = (
+    ("%APPDATA%", APPDATA),
+    ("%LOCALAPPDATA%", LOCAL_APPDATA),
+    ("%LOCALLOW%", LOCAL_LOW),
+    ("%USERPROFILE%", USER_HOME),
+    ("%HOME%", USER_HOME),
+    ("%PUBLIC%", PUBLIC_HOME),
+    ("%PROGRAMDATA%", PROGRAMDATA),
+    ("{APPDATA}", APPDATA),
+    ("{LOCAL}", LOCAL_APPDATA),
+    ("{LOCALLOW}", LOCAL_LOW),
+    ("{DOCS}", DOCUMENTS),
+    ("{SAVED}", SAVED_GAMES),
+    ("{HOME}", USER_HOME),
+)
+
+
+def _replace_token_ci(text: str, token: str, value: str) -> str:
+    return re.sub(re.escape(token), lambda _m: value, text, flags=re.IGNORECASE)
+
+
+def _contains_save_path_var(path: str) -> bool:
+    raw = str(path or "")
+    return any(re.search(re.escape(token), raw, flags=re.IGNORECASE) for token, _ in SAVE_PATH_VAR_ALIASES)
+
+
+def expand_save_path_vars(path: str) -> str:
+    """Expand portable save-path variables to the current machine's absolute path."""
+    clean = str(path or "").strip()
+    if not clean:
+        return ""
+    expanded = clean
+    for token, value in SAVE_PATH_VAR_ALIASES:
+        expanded = _replace_token_ci(expanded, token, str(value))
+    expanded = os.path.expandvars(os.path.expanduser(expanded))
+    return os.path.normpath(expanded)
+
+
+def _path_has_prefix(path: str, root: str) -> bool:
+    try:
+        path_norm = os.path.normcase(os.path.normpath(path))
+        root_norm = os.path.normcase(os.path.normpath(root))
+        return os.path.commonpath([path_norm, root_norm]) == root_norm
+    except Exception:
+        return False
+
+
+def compact_save_path_vars(path: str) -> str:
+    """Convert local absolute save paths into portable variables for config storage."""
+    clean = str(path or "").strip()
+    if not clean:
+        return ""
+    if _contains_save_path_var(clean):
+        return os.path.normpath(clean)
+    expanded = expand_save_path_vars(clean)
+    expanded_norm = os.path.normpath(expanded)
+    for token, root in SAVE_PATH_VAR_ROOTS:
+        root_norm = os.path.normpath(str(root))
+        if not root_norm or not _path_has_prefix(expanded_norm, root_norm):
+            continue
+        if os.path.normcase(expanded_norm) == os.path.normcase(root_norm):
+            return os.path.normpath(token)
+        suffix = expanded_norm[len(root_norm):].lstrip("\\/")
+        return os.path.normpath(os.path.join(token, suffix))
+    return os.path.normpath(clean)
+
+
 _RE_RECOGNITION_NAME = re.compile(r"[^a-z0-9\u4e00-\u9fff]+")
 
 
@@ -2237,7 +2315,7 @@ def get_recognition_blacklist(cfg: Optional[dict], appid: str, game_name: str) -
     excludes = get_recognition_excludes(cfg).get(key, [])
     if not isinstance(excludes, list):
         return set()
-    return {os.path.normpath(p) for p in excludes if isinstance(p, str) and p}
+    return {expand_save_path_vars(p) for p in excludes if isinstance(p, str) and p}
 
 
 def get_cached_recognition_path(cfg: Optional[dict], appid: str, game_name: str) -> str:
@@ -2250,7 +2328,7 @@ def get_cached_recognition_path(cfg: Optional[dict], appid: str, game_name: str)
         path = entry
     else:
         path = ""
-    path = os.path.normpath(path) if path else ""
+    path = expand_save_path_vars(path) if path else ""
     if path and os.path.exists(path):
         return path
     return ""
@@ -2260,14 +2338,14 @@ def remember_recognition_path(cfg: Optional[dict], appid: str, game_name: str, p
     if not cfg or not path:
         return
     key = _recognition_key(appid, game_name)
-    norm = os.path.normpath(path)
+    norm = expand_save_path_vars(path)
     get_recognition_cache(cfg)[key] = {
         "path": norm,
         "updated_at": time.time(),
     }
     excludes = get_recognition_excludes(cfg).get(key, [])
     if isinstance(excludes, list):
-        get_recognition_excludes(cfg)[key] = [p for p in excludes if os.path.normpath(p) != norm]
+        get_recognition_excludes(cfg)[key] = [p for p in excludes if expand_save_path_vars(p) != norm]
     with _SAVE_DETECTION_CACHE_LOCK:
         _SAVE_DETECTION_CACHE.clear()
 
@@ -2276,12 +2354,12 @@ def exclude_recognition_path(cfg: Optional[dict], appid: str, game_name: str, pa
     if not cfg or not path:
         return
     key = _recognition_key(appid, game_name)
-    norm = os.path.normpath(path)
+    norm = expand_save_path_vars(path)
     excludes = get_recognition_excludes(cfg).setdefault(key, [])
-    if norm not in [os.path.normpath(p) for p in excludes if isinstance(p, str)]:
+    if norm not in [expand_save_path_vars(p) for p in excludes if isinstance(p, str)]:
         excludes.append(norm)
     cached = get_recognition_cache(cfg).get(key)
-    if isinstance(cached, dict) and os.path.normpath(cached.get("path", "")) == norm:
+    if isinstance(cached, dict) and expand_save_path_vars(cached.get("path", "")) == norm:
         get_recognition_cache(cfg).pop(key, None)
     with _SAVE_DETECTION_CACHE_LOCK:
         _SAVE_DETECTION_CACHE.clear()
@@ -2311,7 +2389,7 @@ def _normalize_unique_paths(paths: list[str]) -> list[str]:
         clean = path.strip()
         if not clean:
             continue
-        norm = os.path.normpath(clean)
+        norm = expand_save_path_vars(clean)
         key = os.path.normcase(norm)
         if key in seen:
             continue
@@ -2320,12 +2398,31 @@ def _normalize_unique_paths(paths: list[str]) -> list[str]:
     return normalized
 
 
-def _normalize_save_spec(spec: dict) -> Optional[dict]:
+def _normalize_unique_storage_paths(paths: list[str]) -> list[str]:
+    normalized = []
+    seen = set()
+    for path in paths:
+        if not isinstance(path, str):
+            continue
+        clean = path.strip()
+        if not clean:
+            continue
+        norm = compact_save_path_vars(clean)
+        key = os.path.normcase(expand_save_path_vars(norm))
+        if key in seen:
+            continue
+        seen.add(key)
+        normalized.append(norm)
+    return normalized
+
+
+def _normalize_save_spec(spec: dict, *, for_storage: bool = False) -> Optional[dict]:
     if not isinstance(spec, dict):
         return None
     base = str(spec.get("base", "") or "").strip()
     if not base:
         return None
+    base = compact_save_path_vars(base) if for_storage else expand_save_path_vars(base)
     includes = spec.get("includes", [])
     if isinstance(includes, str):
         includes = [includes]
@@ -2349,15 +2446,15 @@ def _normalize_save_spec(spec: dict) -> Optional[dict]:
     }
 
 
-def _normalize_unique_save_specs(specs: list[dict]) -> list[dict]:
+def _normalize_unique_save_specs(specs: list[dict], *, for_storage: bool = False) -> list[dict]:
     normalized = []
     seen = set()
     for spec in specs:
-        clean = _normalize_save_spec(spec)
+        clean = _normalize_save_spec(spec, for_storage=for_storage)
         if not clean:
             continue
         key = (
-            os.path.normcase(clean["base"]),
+            os.path.normcase(expand_save_path_vars(clean["base"])),
             tuple(p.lower() for p in clean["includes"]),
             clean["recursive"],
         )
@@ -2366,7 +2463,7 @@ def _normalize_unique_save_specs(specs: list[dict]) -> list[dict]:
         seen.add(key)
         normalized.append(clean)
     filtered_bases = {
-        os.path.normcase(spec["base"])
+        os.path.normcase(expand_save_path_vars(spec["base"]))
         for spec in normalized
         if spec.get("includes")
     }
@@ -2374,16 +2471,16 @@ def _normalize_unique_save_specs(specs: list[dict]) -> list[dict]:
         normalized = [
             spec for spec in normalized
             if not (
-                os.path.normcase(spec["base"]) in filtered_bases
+                os.path.normcase(expand_save_path_vars(spec["base"])) in filtered_bases
                 and not spec.get("includes")
             )
         ]
     return normalized
 
 
-def _default_save_spec(path: str) -> dict:
+def _default_save_spec(path: str, *, for_storage: bool = False) -> dict:
     return {
-        "base": os.path.normpath(path),
+        "base": os.path.normpath(compact_save_path_vars(path) if for_storage else expand_save_path_vars(path)),
         "includes": [],
         "recursive": True,
     }
@@ -2422,27 +2519,51 @@ def get_game_save_paths(game: Optional[dict], existing_only: bool = False) -> li
     return result
 
 
+def get_game_save_path_templates(game: Optional[dict], existing_only: bool = False) -> list[str]:
+    if not isinstance(game, dict):
+        return []
+    raw_specs = game.get("save_specs", [])
+    storage_specs = _normalize_unique_save_specs(raw_specs if isinstance(raw_specs, list) else [], for_storage=True)
+    if storage_specs:
+        result = _normalize_unique_storage_paths([spec.get("base", "") for spec in storage_specs])
+    else:
+        paths = []
+        raw_paths = game.get("save_paths", [])
+        if isinstance(raw_paths, list):
+            paths.extend(raw_paths)
+        primary = game.get("save_path", "")
+        if isinstance(primary, str) and primary.strip():
+            paths.append(primary)
+        result = _normalize_unique_storage_paths(paths)
+    if existing_only:
+        result = [p for p in result if os.path.isdir(expand_save_path_vars(p))]
+    return result
+
+
 def set_game_save_specs(game: dict, specs: list[dict]):
-    normalized_specs = _normalize_unique_save_specs(specs)
+    normalized_specs = _normalize_unique_save_specs(specs, for_storage=True)
     game["save_specs"] = normalized_specs
-    bases = _normalize_unique_paths([spec["base"] for spec in normalized_specs])
+    bases = _normalize_unique_storage_paths([spec["base"] for spec in normalized_specs])
     game["save_paths"] = bases
     game["save_path"] = bases[0] if bases else ""
 
 
 def set_game_save_paths(game: dict, paths: list[str]):
-    normalized = _normalize_unique_paths(paths)
+    normalized = _normalize_unique_storage_paths(paths)
     existing_specs = get_game_save_specs(game, existing_only=False)
     grouped: dict[str, list[dict]] = {}
     for spec in existing_specs:
-        grouped.setdefault(os.path.normcase(spec["base"]), []).append(spec)
+        grouped.setdefault(os.path.normcase(expand_save_path_vars(spec["base"])), []).append(spec)
     rebuilt_specs = []
     for path in normalized:
-        specs_for_base = grouped.get(os.path.normcase(path), [])
+        specs_for_base = grouped.get(os.path.normcase(expand_save_path_vars(path)), [])
         if specs_for_base:
-            rebuilt_specs.extend(specs_for_base)
+            for spec in specs_for_base:
+                rebuilt = dict(spec)
+                rebuilt["base"] = path
+                rebuilt_specs.append(rebuilt)
         else:
-            rebuilt_specs.append(_default_save_spec(path))
+            rebuilt_specs.append(_default_save_spec(path, for_storage=True))
     set_game_save_specs(game, rebuilt_specs)
 
 
@@ -4148,6 +4269,7 @@ def load_config() -> dict:
             old_primary = game.get("save_path", "")
             old_specs = list(game.get("save_specs", [])) if isinstance(game.get("save_specs", []), list) else []
             old_monitor = list(game.get("monitor_processes", [])) if isinstance(game.get("monitor_processes", []), list) else game.get("monitor_processes", "")
+            old_storage_specs = _normalize_unique_save_specs(old_specs, for_storage=True)
             if "sync_enabled" not in game:
                 game["sync_enabled"] = True
                 changed = True
@@ -4160,7 +4282,7 @@ def load_config() -> dict:
             if (
                 game.get("save_path", "") != old_primary
                 or "save_paths" not in game
-                or old_specs != normalized_specs
+                or old_storage_specs != game.get("save_specs", [])
                 or old_monitor != game.get("monitor_processes", [])
             ):
                 changed = True
@@ -9379,6 +9501,7 @@ class SteamSaveManager(ctk.CTk):
             return dict(cached.get("data", {}))
 
         save_paths = get_game_save_paths(game, existing_only=False)
+        display_paths = get_game_save_path_templates(game, existing_only=False)
         existing_paths = [p for p in save_paths if os.path.isdir(p)]
         path_ok = bool(existing_paths)
         file_count = 0
@@ -9391,6 +9514,7 @@ class SteamSaveManager(ctk.CTk):
 
         data = {
             "save_paths": save_paths,
+            "display_paths": display_paths,
             "existing_paths": existing_paths,
             "path_ok": path_ok,
             "file_count": file_count,
@@ -10152,7 +10276,7 @@ class SteamSaveManager(ctk.CTk):
                 nm = "★ " + nm
             item["title"].configure(text=nm)
 
-            save_paths = get_game_save_paths(g, existing_only=False)
+            save_paths = get_game_save_path_templates(g, existing_only=False)
             p = save_paths[0] if save_paths else g.get("save_path", "")
             if len(save_paths) > 1:
                 p += self.bi(f"  (+{len(save_paths)-1} 个目录)", f"  (+{len(save_paths)-1} folders)")
@@ -10206,7 +10330,7 @@ class SteamSaveManager(ctk.CTk):
 
     def _create_save_paths_editor(self, parent, initial_paths=None, width=420):
         state = {"rows": []}
-        initial = _normalize_unique_paths(initial_paths or [])
+        initial = _normalize_unique_storage_paths(initial_paths or [])
         if not initial:
             initial = [""]
 
@@ -10219,8 +10343,8 @@ class SteamSaveManager(ctk.CTk):
         ctk.CTkLabel(
             hdr,
             text=self.bi(
-                "可添加多个存档目录，第一项会作为主路径显示",
-                "You can add multiple save folders. The first one is treated as the primary path.",
+                "可添加多个存档目录，支持 %USERPROFILE% / %APPDATA% / %LOCALAPPDATA%",
+                "You can add multiple save folders. %USERPROFILE% / %APPDATA% / %LOCALAPPDATA% are supported.",
             ),
             font=font(11),
             text_color=C_SUBTLE_TEXT,
@@ -10336,7 +10460,7 @@ class SteamSaveManager(ctk.CTk):
                 ).grid(row=0, column=4, padx=(0, 10), pady=10)
 
         def _get_paths():
-            return _normalize_unique_paths([row["var"].get() for row in state["rows"]])
+            return _normalize_unique_storage_paths([row["var"].get() for row in state["rows"]])
 
         state["frame"] = wrap
         state["get_paths"] = _get_paths
@@ -10372,7 +10496,7 @@ class SteamSaveManager(ctk.CTk):
         ctk.CTkLabel(d, text=self.bi("存档路径", "Save Paths"), font=font(13)).grid(
             row=r, column=0, padx=24, pady=(12, 4), sticky="w")
         r += 1
-        initial_paths = get_game_save_paths(g, existing_only=False) if is_edit else None
+        initial_paths = get_game_save_path_templates(g, existing_only=False) if is_edit else None
         editor = self._create_save_paths_editor(d, initial_paths, width=420)
         editor["frame"].grid(row=r, column=0, padx=24, sticky="ew")
         r += 1
@@ -10714,7 +10838,7 @@ class SteamSaveManager(ctk.CTk):
             text=g.get("appid", "") or self.bi("未设置", "Not set"))
         self._detail_stats["backups"].configure(text=str(len(backups)))
         self._detail_stats["size"].configure(text=fmt_size(total_size))
-        save_paths = detail_metrics.get("save_paths", [])
+        save_paths = detail_metrics.get("display_paths", []) or detail_metrics.get("save_paths", [])
         existing_paths = detail_metrics.get("existing_paths", [])
         path_ok = bool(detail_metrics.get("path_ok", False))
         file_count = int(detail_metrics.get("file_count", 0))
