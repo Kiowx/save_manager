@@ -1,6 +1,6 @@
 {
-  "sha256": "b430100b264c611e9f3469cf7989ba6c5b899442aea455a0bcbe410942ce505b",
-  "url": "https://github.com/Kiowx/save_manager/releases/download/v1.5.3/SteamSaveManager.exe",
-  "version": "1.5.3",
-  "notes": "1. 存档路径支持 %USERPROFILE%、%APPDATA%、%LOCALAPPDATA% 等变量，换电脑后会自动指向新系统位置。\n2. 旧的用户目录绝对路径会自动转换为变量路径，列表、详情和编辑窗口都会显示可迁移路径。\n3. 备份、同步、监控和导入恢复会在执行时自动展开变量，不影响原有使用。\n4. Save paths now support variables like %USERPROFILE%, %APPDATA%, and %LOCALAPPDATA%, so they can follow the new PC's folders.\n5. Existing absolute paths under user folders are converted to portable variable paths and shown that way in the UI.\n6. Backup, sync, monitoring, and restore flows expand variables at runtime without changing existing behavior."
+  "url": "https://github.com/Kiowx/save_manager/releases/download/v1.5.4/SteamSaveManager.exe",
+  "notes": "1. 修复全新安装后本地缓存为空时无法识别云端存档的问题。\n2. WebDAV 同步会从云端归档恢复游戏信息，并把最新存档拉到本地缓存。\n3. 手动同步也会主动刷新云端缓存，相关中文提示统一使用“云端”。\n4. Fixed cloud saves not being detected on a fresh install when the local cache is empty.\n5. WebDAV sync can rebuild game entries from cloud archives and pull the latest save into the local cache.\n6. Manual sync now refreshes the cloud cache too, and Chinese wording consistently uses cloud terminology.",
+  "sha256": "30dc4a4aac55ca58aff9b406ee3b1a0e3cfb83fa32ea8fbebf4db0ee0b637924",
+  "version": "1.5.4"
 }
