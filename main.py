@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Steam 游戏存档备份管理器 v1.5.3 — 通用版"""
+"""Steam 游戏存档备份管理器 v1.5.4 — 通用版"""
 
 import os
 import sys
@@ -104,7 +104,7 @@ except ImportError as exc:
 # ══════════════════════════════════════════════
 
 APP_NAME = "Steam Save Manager"
-VERSION = "1.5.3"
+VERSION = "1.5.4"
 APP_DIR = Path(os.path.dirname(os.path.abspath(sys.argv[0])))
 LEGACY_CONFIG_DIR = Path.home() / ".steam_save_manager"
 STARTUP_AUTOSTART_FLAG = "--startup-launch"
@@ -5548,6 +5548,41 @@ def _webdav_remote_archive_dir(cfg: Optional[dict], game_ref) -> str:
     return _webdav_remote_archive_dirs(cfg, game_ref)[0]
 
 
+def _webdav_archive_entries_from_existing_dir(client, existing_dir: str) -> list[dict]:
+    entries = []
+    seen = set()
+
+    def _add_zip_entry(archive_dir: str, name: str):
+        if not name.endswith(".zip"):
+            return
+        entry_key = (archive_dir, name)
+        if entry_key in seen:
+            return
+        seen.add(entry_key)
+        entries.append({"dir": archive_dir, "name": name})
+
+    items = client.list(existing_dir)
+    for item in items:
+        name = item.strip("/").rsplit("/", 1)[-1] if "/" in item else item.strip("/")
+        if not name:
+            continue
+        if name.endswith(".zip"):
+            _add_zip_entry(existing_dir, name)
+            continue
+        # 兼容本地云盘缓存形态：archives/YYYY-MM/*.zip
+        nested_dir = f"{existing_dir.rstrip('/')}/{name}"
+        try:
+            nested_existing_dir = _webdav_find_existing_variant(client, nested_dir)
+            nested_items = client.list(nested_existing_dir)
+        except Exception:
+            continue
+        for nested_item in nested_items:
+            nested_name = nested_item.strip("/").rsplit("/", 1)[-1] if "/" in nested_item else nested_item.strip("/")
+            _add_zip_entry(nested_existing_dir, nested_name)
+    entries.sort(key=lambda item: item["name"])
+    return entries
+
+
 def _webdav_list_archive_entries(client, cfg: dict, game_ref, strict: bool = False) -> list[dict]:
     entries = []
     seen = set()
@@ -5561,19 +5596,16 @@ def _webdav_list_archive_entries(client, cfg: dict, game_ref, strict: bool = Fal
             errors.append(f"{remote_dir}: {type(e).__name__}: {e}")
             continue
         try:
-            items = client.list(existing_dir)
+            dir_entries = _webdav_archive_entries_from_existing_dir(client, existing_dir)
         except Exception as e:
             errors.append(f"{existing_dir}: {type(e).__name__}: {e}")
             continue
-        for item in items:
-            name = item.strip("/").rsplit("/", 1)[-1] if "/" in item else item.strip("/")
-            if not name.endswith(".zip"):
-                continue
-            entry_key = (existing_dir, name)
+        for entry in dir_entries:
+            entry_key = (entry["dir"], entry["name"])
             if entry_key in seen:
                 continue
             seen.add(entry_key)
-            entries.append({"dir": existing_dir, "name": name})
+            entries.append(entry)
     entries.sort(key=lambda item: item["name"])
     if strict and not entries and errors:
         raise RuntimeError("Failed to list WebDAV archives: " + "; ".join(errors[:3]))
@@ -5944,6 +5976,91 @@ def webdav_download_latest(cfg: dict, game_ref, local_sync_game_dir: Path,
             except Exception:
                 pass
         raise
+
+
+def _webdav_download_json_meta(client, remote_meta_path: str) -> dict:
+    temp_path = ""
+    try:
+        with tempfile.NamedTemporaryFile("w+b", delete=False, suffix=".json") as tmp:
+            temp_path = tmp.name
+        _webdav_download_with_variants(client, remote_meta_path, temp_path)
+        return load_json_file_tolerant(temp_path, default={}) or {}
+    except Exception:
+        return {}
+    finally:
+        if temp_path:
+            try:
+                os.remove(temp_path)
+            except Exception:
+                pass
+
+
+def webdav_discover_remote_games(cfg: Optional[dict], local_sync_root: str) -> list[dict]:
+    """Discover WebDAV archive folders and rebuild game entries from their meta files."""
+    client = _webdav_make_client(cfg or {})
+    if not client or not local_sync_root:
+        return []
+    try:
+        existing_base = _webdav_find_existing_variant(client, _webdav_base_path(cfg))
+        items = client.list(existing_base)
+    except Exception as e:
+        logger.debug("扫描 WebDAV 远端游戏目录失败: %s", e)
+        return []
+
+    discovered = []
+    seen_keys = set()
+    for item in items:
+        folder_name = item.strip("/").rsplit("/", 1)[-1] if "/" in item else item.strip("/")
+        if not folder_name or folder_name in {".", "..", "Steam_Save_Manager_Probe"}:
+            continue
+        remote_archive_dir = f"{existing_base.rstrip('/')}/{folder_name}/archives"
+        try:
+            existing_archive_dir = _webdav_find_existing_variant(client, remote_archive_dir)
+            archive_entries = _webdav_archive_entries_from_existing_dir(client, existing_archive_dir)
+        except Exception:
+            continue
+        if not archive_entries:
+            continue
+        latest_entry = archive_entries[-1]
+        meta = _webdav_download_json_meta(
+            client,
+            f"{latest_entry['dir'].rstrip('/')}/{latest_entry['name']}.meta.json",
+        )
+        if not meta:
+            continue
+        game_name = str(meta.get("game", "") or "").strip()
+        appid = str(meta.get("appid", "") or "").strip()
+        if not game_name:
+            game_name = appid and f"AppID {appid}" or folder_name
+        game = {
+            "name": game_name,
+            "appid": appid,
+            "sync_enabled": True,
+            "favorite": False,
+        }
+        save_specs = meta.get("save_specs", [])
+        if isinstance(save_specs, list) and save_specs:
+            set_game_save_specs(game, save_specs)
+        else:
+            paths = meta.get("paths", [])
+            if isinstance(paths, list) and paths:
+                set_game_save_paths(game, [str(p) for p in paths if p])
+        if not get_game_save_paths(game, existing_only=False):
+            continue
+        ensure_game_storage_identity(game)
+        sync_key = get_game_sync_folder_key(game)
+        dedupe_key = (appid or "").strip() or sync_key.lower()
+        if dedupe_key in seen_keys:
+            continue
+        seen_keys.add(dedupe_key)
+        try:
+            cache_dir = get_sync_game_dir(local_sync_root, game)
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            webdav_download_latest(cfg or {}, game, cache_dir, cache_mirror_remote=True)
+        except Exception as e:
+            logger.debug("预取 WebDAV 远端存档缓存失败 %s: %s", game_name, e)
+        discovered.append(game)
+    return discovered
 
 
 def snapshot_dir(directory: str) -> dict:
@@ -6507,7 +6624,7 @@ def _sync_game_save_impl(game: dict, sync_folder: str, mode: str = "smart",
 
     should_wait_for_cloud_payload = (
         not using_webdav_cache
-        and auto
+        and mode in {"download", "bidirectional"}
         and remote_count == 0
         and not (mode == "bidirectional" and local_count > 0)
     )
@@ -6517,7 +6634,7 @@ def _sync_game_save_impl(game: dict, sync_folder: str, mode: str = "smart",
             dest_dir,
             len(configured_paths),
             current_payload=remote_payload,
-            timeout=LOCAL_CLOUD_MISSING_PAYLOAD_TIMEOUT,
+            timeout=LOCAL_CLOUD_MISSING_PAYLOAD_TIMEOUT if auto else LOCAL_CLOUD_REFRESH_TIMEOUT,
             interval=LOCAL_CLOUD_REFRESH_INTERVAL,
         )
         if _remote_sync_payload_signature(refreshed_payload) != _remote_sync_payload_signature(remote_payload):
@@ -13155,12 +13272,34 @@ class SteamSaveManager(ctk.CTk):
             )
             return
         games = self.cfg.get("games", [])
-        if not games:
+        can_discover_webdav = webdav_is_ready(self.cfg)
+        if not games and not can_discover_webdav:
             self._show_info(self.bi("提示", "Notice"), self.bi("请先添加游戏", "Please add a game first")); return
         self._set_io_busy(True)
         def _worker():
             try:
-                results = sync_all_games(self.cfg)
+                discovered_count = 0
+                if not self.cfg.get("games", []) and can_discover_webdav:
+                    discovered = webdav_discover_remote_games(self.cfg, sf)
+                    if discovered:
+                        self.cfg.setdefault("games", []).extend(discovered)
+                        save_config(self.cfg)
+                        discovered_count = len(discovered)
+                if not self.cfg.get("games", []):
+                    results = [(
+                        self.bi("云端存档", "Cloud saves"),
+                        self.bi("未在 WebDAV 远端发现可恢复的同步包", "No recoverable sync archives were found on WebDAV"),
+                    )]
+                else:
+                    results = sync_all_games(self.cfg)
+                    if discovered_count:
+                        results.insert(0, (
+                            self.bi("云端存档", "Cloud saves"),
+                            self.bi(
+                                f"已从 WebDAV 远端发现并加入 {discovered_count} 个游戏",
+                                f"Discovered and added {discovered_count} game(s) from WebDAV",
+                            ),
+                        ))
                 self.after(0, lambda: self._on_sync_all_done(results))
             except Exception as e:
                 self.after(0, lambda err=str(e): self._on_sync_failed(err))
