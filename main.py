@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Steam 游戏存档备份管理器 v1.5.4 — 通用版"""
+"""Steam 游戏存档备份管理器 v1.5.5 — 通用版"""
 
 import os
 import sys
@@ -104,7 +104,7 @@ except ImportError as exc:
 # ══════════════════════════════════════════════
 
 APP_NAME = "Steam Save Manager"
-VERSION = "1.5.4"
+VERSION = "1.5.5"
 APP_DIR = Path(os.path.dirname(os.path.abspath(sys.argv[0])))
 LEGACY_CONFIG_DIR = Path.home() / ".steam_save_manager"
 STARTUP_AUTOSTART_FLAG = "--startup-launch"
@@ -290,7 +290,7 @@ TRANSLATIONS = {
         "webdav_preset_hint": "常见地址：{hint}",
         "webdav_url": "WebDAV 服务器地址",
         "webdav_url_ph": "https://your-server.com/dav",
-        "webdav_base_path": "WebDAV 远端目录",
+        "webdav_base_path": "WebDAV 云端目录",
         "webdav_base_path_ph": "/SteamSaveSync",
         "webdav_username": "用户名",
         "webdav_password": "密码",
@@ -2478,6 +2478,51 @@ def _normalize_unique_save_specs(specs: list[dict], *, for_storage: bool = False
     return normalized
 
 
+def _merge_save_specs_with_selected_files(specs: list[dict], file_paths,
+                                           *, for_storage: bool = True) -> list[dict]:
+    """Add only the explicitly selected files while preserving existing rule order."""
+    normalized = _normalize_unique_save_specs(specs, for_storage=for_storage)
+    selected_by_base: OrderedDict[str, dict] = OrderedDict()
+    for file_path in file_paths or []:
+        clean = str(file_path or "").strip()
+        if not clean:
+            continue
+        expanded_file = expand_save_path_vars(clean)
+        file_name = os.path.basename(expanded_file)
+        parent = os.path.dirname(expanded_file)
+        if not file_name or not parent:
+            continue
+        base = compact_save_path_vars(parent) if for_storage else os.path.normpath(parent)
+        base_key = os.path.normcase(expand_save_path_vars(base))
+        group = selected_by_base.setdefault(base_key, {"base": base, "includes": []})
+        pattern = glob.escape(file_name).replace("\\", "/")
+        if pattern.lower() not in {item.lower() for item in group["includes"]}:
+            group["includes"].append(pattern)
+
+    for base_key, selected in selected_by_base.items():
+        selected_spec = {
+            "base": selected["base"],
+            "includes": list(selected["includes"]),
+            "recursive": False,
+        }
+        unfiltered_indexes = [
+            idx for idx, spec in enumerate(normalized)
+            if os.path.normcase(expand_save_path_vars(spec["base"])) == base_key
+            and not spec.get("includes")
+        ]
+        if not unfiltered_indexes:
+            normalized.append(selected_spec)
+            continue
+
+        insert_at = unfiltered_indexes[0]
+        normalized = [
+            spec for idx, spec in enumerate(normalized)
+            if idx not in set(unfiltered_indexes)
+        ]
+        normalized.insert(insert_at, selected_spec)
+    return _normalize_unique_save_specs(normalized, for_storage=for_storage)
+
+
 def _default_save_spec(path: str, *, for_storage: bool = False) -> dict:
     return {
         "base": os.path.normpath(compact_save_path_vars(path) if for_storage else expand_save_path_vars(path)),
@@ -2988,6 +3033,8 @@ def _infer_precise_metadata_specs_for_game(game: Optional[dict], steam_path: str
 def try_upgrade_game_save_specs_from_appinfo(game: Optional[dict], steam_path: str,
                                              cfg: Optional[dict] = None) -> bool:
     if not isinstance(game, dict):
+        return False
+    if game.get("manual_save_specs"):
         return False
     current_paths = get_game_save_paths(game, existing_only=False)
     if not current_paths:
@@ -4978,7 +5025,8 @@ def create_sync_archive(game: dict, sync_game_dir: Path,
         "latest_mtime": snapshot.get("latest_mtime", 0.0),
         "path_count": len(save_specs),
         "paths": [os.path.normpath(spec["base"]) for spec in save_specs],
-        "save_specs": _normalize_unique_save_specs(save_specs),
+        "save_specs": _normalize_unique_save_specs(save_specs, for_storage=True),
+        "manual_save_specs": bool(game.get("manual_save_specs", False)),
         "archive_size": archive_size,
         "archive_sha256": archive_sha256,
     }
@@ -5026,6 +5074,8 @@ def get_latest_sync_archive(sync_game_dir: Path) -> Optional[dict]:
             "timestamp": float(meta.get("timestamp", archive_mtime) or archive_mtime),
             "path_count": int(meta.get("path_count", 1) or 1),
             "paths": meta.get("paths", []),
+            "save_specs": meta.get("save_specs", []),
+            "manual_save_specs": bool(meta.get("manual_save_specs", False)),
         }
     return None
 
@@ -5109,7 +5159,7 @@ def refresh_local_sync_payload(sync_root: str, sync_game_dir: Path, path_count: 
 
 
 def _prune_webdav_cache_payload(sync_game_dir: Path, latest_name: Optional[str] = None):
-    """仅在 WebDAV 独立缓存模式下使用，使本地缓存贴近远端实际状态。"""
+    """仅在 WebDAV 独立缓存模式下使用，使本地缓存贴近云端实际状态。"""
     archive_root = get_sync_archive_root(sync_game_dir)
     keep_names = set()
     if latest_name:
@@ -5463,16 +5513,44 @@ def get_sync_backend_issue(sync_folder: str, cfg: Optional[dict] = None) -> str:
     return "not_configured"
 
 
-def _webdav_enhance_error_message(cfg: Optional[dict], message: str) -> str:
+def _webdav_enhance_error_message(cfg: Optional[dict], message: str,
+                                  operation: str = "") -> str:
     raw = str(message or "").strip()
     if not raw:
         return raw
     lowered = raw.lower()
-    if "code 403" not in lowered and "403 forbidden" not in lowered:
+    if not re.search(r"(?:^|\D)403(?:\D|$)", lowered):
         return raw
     url = str((cfg or {}).get("webdav_url", "") or "").strip().lower()
     is_alist_like = ":5244/" in url and "/dav" in url
-    if is_alist_like:
+    operation_key = str(operation or "").strip().lower()
+    is_download = operation_key in {"download", "read"}
+    is_delete = operation_key in {"cleanup", "delete", "remove"}
+    if is_delete and is_alist_like:
+        hint = bilingual_cfg(
+            cfg,
+            "服务器返回 403，云端探针清理被拒绝。若使用 AList，请确认该账号已开启 WebDAV 管理和删除权限。",
+            "Server returned 403 and denied cloud probe cleanup. If this is AList, enable WebDAV Manage and delete permissions.",
+        )
+    elif is_delete:
+        hint = bilingual_cfg(
+            cfg,
+            "服务器返回 403，云端探针清理被拒绝。请检查当前 WebDAV 账号是否具备目标文件和目录的删除/管理权限。",
+            "Server returned 403 and denied cloud probe cleanup. Check whether this WebDAV account has delete/manage permission for the target file and folder.",
+        )
+    elif is_download and is_alist_like:
+        hint = bilingual_cfg(
+            cfg,
+            "服务器返回 403，云端文件读取/下载被拒绝。若使用 AList，请确认该账号已开启 WebDAV 读取权限，并可读取目标目录和文件。",
+            "Server returned 403 and denied reading/downloading the cloud file. If this is AList, enable WebDAV Read and allow access to the target folder and file.",
+        )
+    elif is_download:
+        hint = bilingual_cfg(
+            cfg,
+            "服务器返回 403，云端文件读取/下载被拒绝。请检查当前 WebDAV 账号是否具备目标目录和文件的读取权限。",
+            "Server returned 403 and denied reading/downloading the cloud file. Check whether this WebDAV account can read the target folder and file.",
+        )
+    elif is_alist_like:
         hint = bilingual_cfg(
             cfg,
             "服务器返回 403。若使用 AList，请确认该账号已开启 WebDAV 读取、WebDAV 管理，以及创建目录或上传、删除、重命名、复制等权限。",
@@ -5481,21 +5559,34 @@ def _webdav_enhance_error_message(cfg: Optional[dict], message: str) -> str:
     else:
         hint = bilingual_cfg(
             cfg,
-            "服务器返回 403。请检查当前 WebDAV 账号是否对目标目录具备写入权限。",
-            "Server returned 403. Check whether the current WebDAV account has write permission to the target folder.",
+            "服务器返回 403。请检查当前 WebDAV 账号是否对云端目标目录具备写入权限。",
+            "Server returned 403. Check whether the current WebDAV account has write permission to the target cloud folder.",
         )
+    if hint in raw:
+        return raw
     return f"{raw} | {hint}"
 
 
 def webdav_test_connection(url: str, username: str, password: str,
                            preset: str = "generic", verify_ssl: bool = True,
                            base_path: str = "/SteamSaveSync") -> tuple:
-    """测试 WebDAV 连接与写权限，返回 (success: bool, message: str)。"""
+    """测试 WebDAV 上传、下载、内容校验和清理，返回 (success, message)。"""
     if not HAS_WEBDAV:
         return False, f"WebDAV import failed: {WEBDAV_IMPORT_ERROR or 'webdavclient3 not installed'}"
-    temp_file_path = ""
+    temp_file_paths = []
+    client = None
+    probe_root = ""
+    probe_file = ""
+    probe_file_cleaned = False
+    probe_root_cleaned = False
+    phase = "connect"
+    temp_cfg = {
+        "language": cfg_language(None),
+        "webdav_url": url,
+    }
     try:
         normalized_url = _webdav_normalize_url(url.strip(), preset, username)
+        temp_cfg["webdav_url"] = normalized_url
         hostname, root = _webdav_split_url(normalized_url)
         client = WebDAVClient({
             "webdav_hostname": hostname,
@@ -5512,32 +5603,67 @@ def webdav_test_connection(url: str, username: str, password: str,
         probe_name = f".ssm_probe_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
         probe_root = f"{base_dir.rstrip('/')}/Steam_Save_Manager_Probe/archives/{probe_name}"
         probe_file = f"{probe_root}/probe.txt"
+        phase = "write"
         _webdav_ensure_remote_dir(client, probe_root)
 
-        with tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False, suffix=".txt") as tmp:
-            tmp.write("Steam Save Manager WebDAV probe")
-            temp_file_path = tmp.name
+        probe_payload = f"Steam Save Manager WebDAV probe: {probe_name}".encode("utf-8")
+        with tempfile.NamedTemporaryFile("wb", delete=False, suffix=".txt") as tmp:
+            tmp.write(probe_payload)
+            upload_temp_path = tmp.name
+            temp_file_paths.append(upload_temp_path)
 
-        _webdav_upload_with_variants(client, probe_file, temp_file_path)
-        _webdav_clean_with_variants(client, probe_file)
-        _webdav_clean_with_variants(client, probe_root)
+        _webdav_upload_with_variants(client, probe_file, upload_temp_path)
+        with tempfile.NamedTemporaryFile("w+b", delete=False, suffix=".txt") as tmp:
+            download_temp_path = tmp.name
+            temp_file_paths.append(download_temp_path)
+        phase = "download"
+        _webdav_download_with_variants(client, probe_file, download_temp_path)
+        phase = "verify"
+        with open(download_temp_path, "rb") as downloaded:
+            if downloaded.read() != probe_payload:
+                raise RuntimeError(bilingual_cfg(
+                    temp_cfg,
+                    "WebDAV 云端探针下载内容校验失败。",
+                    "The downloaded WebDAV cloud probe did not match the uploaded content.",
+                ))
+        phase = "cleanup"
         try:
-            _webdav_clean_with_variants(client, f"{base_dir.rstrip('/')}/Steam_Save_Manager_Probe/archives")
-        except Exception:
-            pass
-        try:
-            _webdav_clean_with_variants(client, f"{base_dir.rstrip('/')}/Steam_Save_Manager_Probe")
-        except Exception:
-            pass
+            _webdav_clean_with_variants(client, probe_file)
+            if _webdav_path_exists(client, probe_file):
+                raise RuntimeError("probe file still exists after deletion")
+            probe_file_cleaned = True
+            _webdav_clean_with_variants(client, probe_root)
+            if _webdav_path_exists(client, probe_root):
+                raise RuntimeError("probe directory still exists after deletion")
+            probe_root_cleaned = True
+        except Exception as cleanup_error:
+            raise RuntimeError(bilingual_cfg(
+                temp_cfg,
+                f"WebDAV 云端探针清理失败；请检查删除/管理权限：{cleanup_error}",
+                f"WebDAV cloud probe cleanup failed; check delete/manage permissions: {cleanup_error}",
+            )) from cleanup_error
         return True, "OK"
     except Exception as e:
-        temp_cfg = {
-            "language": cfg_language(None),
-            "webdav_url": normalized_url if 'normalized_url' in locals() else url,
-        }
-        return False, _webdav_enhance_error_message(temp_cfg, f"{type(e).__name__}: {e}")
+        if phase in {"download", "verify"}:
+            operation = "download"
+        elif phase == "cleanup":
+            operation = "delete"
+        else:
+            operation = "write"
+        return False, _webdav_enhance_error_message(
+            temp_cfg, f"{type(e).__name__}: {e}", operation=operation)
     finally:
-        if temp_file_path:
+        if client is not None and probe_file and not probe_file_cleaned:
+            try:
+                _webdav_clean_with_variants(client, probe_file)
+            except Exception:
+                pass
+        if client is not None and probe_root and not probe_root_cleaned:
+            try:
+                _webdav_clean_with_variants(client, probe_root)
+            except Exception:
+                pass
+        for temp_file_path in temp_file_paths:
             try:
                 os.remove(temp_file_path)
             except Exception:
@@ -5654,6 +5780,36 @@ def _webdav_find_existing_variant(client, remote_path: str) -> str:
     raise FileNotFoundError(remote_path)
 
 
+def _webdav_path_exists(client, remote_path: str) -> bool:
+    raw_path = str(remote_path or "").replace("\\", "/")
+    file_name = PurePosixPath(raw_path).name
+    parent_dir = str(PurePosixPath(raw_path).parent)
+    if not file_name:
+        return False
+    last_error = None
+    parent_missing = False
+    for candidate in _webdav_path_variants(parent_dir):
+        try:
+            items = client.list(candidate)
+        except Exception as e:
+            lowered = str(e).lower()
+            if any(token in lowered for token in ("404", "not found", "does not exist")):
+                parent_missing = True
+                continue
+            last_error = e
+            continue
+        for item in items:
+            item_name = str(item or "").strip("/").rsplit("/", 1)[-1]
+            if item_name == file_name:
+                return True
+        return False
+    if parent_missing and last_error is None:
+        return False
+    if last_error:
+        raise last_error
+    return False
+
+
 def _webdav_upload_with_variants(client, remote_path: str, local_path: str):
     last_error = None
     for candidate in _webdav_path_variants(remote_path):
@@ -5690,7 +5846,10 @@ def _webdav_clean_with_variants(client, remote_path: str):
     last_error = None
     for candidate in _webdav_path_variants(remote_path):
         try:
-            client.clean(candidate)
+            result = client.clean(candidate)
+            if result is False:
+                last_error = RuntimeError(f"clean returned False for {candidate}")
+                continue
             return candidate
         except Exception as e:
             last_error = e
@@ -5838,7 +5997,7 @@ def webdav_list_archives(cfg: dict, game_ref) -> list:
 
 
 def webdav_enforce_archive_limits(cfg: dict, game_ref, keep_count: int = 3):
-    """执行 WebDAV 远端归档轮转，只保留最近 keep_count 个 ZIP。"""
+    """执行 WebDAV 云端归档轮转，只保留最近 keep_count 个 ZIP。"""
     if keep_count <= 0:
         return
     client = _webdav_make_client(cfg)
@@ -5874,7 +6033,14 @@ def webdav_download_latest(cfg: dict, game_ref, local_sync_game_dir: Path,
     client = _webdav_make_client(cfg)
     if not client:
         raise RuntimeError("WebDAV client is unavailable")
-    archive_entries = _webdav_list_archive_entries(client, cfg, game_ref, strict=True)
+    try:
+        archive_entries = _webdav_list_archive_entries(client, cfg, game_ref, strict=True)
+    except Exception as e:
+        raw_message = f"{type(e).__name__}: {e}"
+        enhanced = _webdav_enhance_error_message(cfg, raw_message, operation="download")
+        if enhanced != raw_message:
+            raise RuntimeError(enhanced) from e
+        raise
     if not archive_entries:
         if cache_mirror_remote:
             _prune_webdav_cache_payload(local_sync_game_dir, None)
@@ -5942,7 +6108,7 @@ def webdav_download_latest(cfg: dict, game_ref, local_sync_game_dir: Path,
     try:
         _webdav_download_with_variants(client, remote_zip, str(temp_zip))
 
-        # meta 文件缺失不视为致命；ZIP 本体会继续用远端 size 和 zip 完整性校验。
+        # meta 文件缺失不视为致命；ZIP 本体会继续用云端 size 和 zip 完整性校验。
         try:
             _webdav_download_with_variants(
                 client,
@@ -5969,12 +6135,16 @@ def webdav_download_latest(cfg: dict, game_ref, local_sync_game_dir: Path,
         if cache_mirror_remote:
             _prune_webdav_cache_payload(local_sync_game_dir, latest_name)
         return str(local_zip)
-    except Exception:
+    except Exception as e:
         for temp_path in (temp_zip, temp_meta):
             try:
                 temp_path.unlink(missing_ok=True)
             except Exception:
                 pass
+        raw_message = f"{type(e).__name__}: {e}"
+        enhanced = _webdav_enhance_error_message(cfg, raw_message, operation="download")
+        if enhanced != raw_message:
+            raise RuntimeError(enhanced) from e
         raise
 
 
@@ -6004,7 +6174,7 @@ def webdav_discover_remote_games(cfg: Optional[dict], local_sync_root: str) -> l
         existing_base = _webdav_find_existing_variant(client, _webdav_base_path(cfg))
         items = client.list(existing_base)
     except Exception as e:
-        logger.debug("扫描 WebDAV 远端游戏目录失败: %s", e)
+        logger.debug("扫描 WebDAV 云端游戏目录失败: %s", e)
         return []
 
     discovered = []
@@ -6045,6 +6215,8 @@ def webdav_discover_remote_games(cfg: Optional[dict], local_sync_root: str) -> l
             paths = meta.get("paths", [])
             if isinstance(paths, list) and paths:
                 set_game_save_paths(game, [str(p) for p in paths if p])
+        if meta.get("manual_save_specs"):
+            game["manual_save_specs"] = True
         if not get_game_save_paths(game, existing_only=False):
             continue
         ensure_game_storage_identity(game)
@@ -6058,7 +6230,7 @@ def webdav_discover_remote_games(cfg: Optional[dict], local_sync_root: str) -> l
             cache_dir.mkdir(parents=True, exist_ok=True)
             webdav_download_latest(cfg or {}, game, cache_dir, cache_mirror_remote=True)
         except Exception as e:
-            logger.debug("预取 WebDAV 远端存档缓存失败 %s: %s", game_name, e)
+            logger.debug("预取 WebDAV 云端存档缓存失败 %s: %s", game_name, e)
         discovered.append(game)
     return discovered
 
@@ -6495,7 +6667,7 @@ def _sync_game_save_impl(game: dict, sync_folder: str, mode: str = "smart",
 
     steam_path_for_upgrade = str(cfg.get("steam_path", "") or "").strip() if cfg else ""
     effective_specs = []
-    if steam_path_for_upgrade:
+    if steam_path_for_upgrade and not game.get("manual_save_specs"):
         precise_specs = _infer_precise_metadata_specs_for_game(game, steam_path_for_upgrade, cfg)
         if precise_specs:
             current_paths = get_game_save_paths(game, existing_only=False)
@@ -6641,7 +6813,7 @@ def _sync_game_save_impl(game: dict, sync_folder: str, mode: str = "smart",
             remote_payload = refreshed_payload
             remote_hash, remote_count, remote_label, remote_info = _build_remote_state(remote_payload)
 
-    # 预检：远端是 ZIP 归档但本地副本无效（云盘占位文件尚未同步完整）时，
+    # 预检：云端是 ZIP 归档但本地副本无效（云盘占位文件尚未同步完整）时，
     # 触发云盘刷新并等待；仍无效则按 auto 决定重试或返回友好提示，
     # 避免 extract_sync_archive 直接抛 BadZipFile。
     if (not using_webdav_cache
@@ -6745,7 +6917,13 @@ def _sync_game_save_impl(game: dict, sync_folder: str, mode: str = "smart",
         if not current_remote:
             return
         if current_remote.get("kind") == "archive":
-            extract_sync_archive(Path(current_remote["archive_path"]), configured_specs)
+            archive_specs = current_remote.get("save_specs", [])
+            restore_specs = (
+                _normalize_unique_save_specs(archive_specs)
+                if isinstance(archive_specs, list) and archive_specs
+                else configured_specs
+            )
+            extract_sync_archive(Path(current_remote["archive_path"]), restore_specs)
             return
         if len(configured_paths) == 1:
             legacy_pairs = [(configured_paths[0], str(dest_dir))]
@@ -6773,7 +6951,7 @@ def _sync_game_save_impl(game: dict, sync_folder: str, mode: str = "smart",
     if using_webdav_cache and webdav_prefetch_error and mode in {"download", "bidirectional"}:
         return bilingual_text(
             lang,
-            f"跳过：WebDAV 远端状态刷新失败（{webdav_prefetch_error}）",
+            f"跳过：WebDAV 云端状态刷新失败（{webdav_prefetch_error}）",
             f"Skipped: failed to refresh WebDAV remote state ({webdav_prefetch_error})",
         )
 
@@ -7283,6 +7461,8 @@ def _plan_backup_restore_entries(zf: zipfile.ZipFile, target_specs: list[dict]) 
         spec = target_specs[0]
         base_dir = Path(spec["base"])
         for member in members:
+            if not _save_spec_match_relpath(spec, member):
+                continue
             entries.append((0, spec, member, _zip_safe_restore_path(base_dir, member)))
         return entries
     for member in members:
@@ -7300,12 +7480,18 @@ def _plan_backup_restore_entries(zf: zipfile.ZipFile, target_specs: list[dict]) 
             )
         target_idx = idx
         spec = target_specs[target_idx]
+        if not _save_spec_match_relpath(spec, rel):
+            continue
         entries.append((target_idx, spec, member, _zip_safe_restore_path(Path(spec["base"]), rel)))
     return entries
 
 
 def restore_backup(zip_path: str, target_dir):
-    if isinstance(target_dir, list) and target_dir and isinstance(target_dir[0], dict):
+    backup_meta = load_json_file_tolerant(Path(zip_path).with_suffix(".meta.json"), default={}) or {}
+    backup_specs = backup_meta.get("save_specs", []) if isinstance(backup_meta, dict) else []
+    if isinstance(backup_specs, list) and backup_specs:
+        target_specs = _normalize_unique_save_specs(backup_specs)
+    elif isinstance(target_dir, list) and target_dir and isinstance(target_dir[0], dict):
         target_specs = get_game_save_specs({"save_specs": target_dir}, existing_only=False)
     else:
         targets = target_dir if isinstance(target_dir, list) else [target_dir]
@@ -7423,6 +7609,12 @@ def get_backups(game_ref, limit: Optional[int] = None) -> list:
             meta = {}
             if meta_file.exists():
                 meta = load_json_file_tolerant(meta_file, default={}) or {}
+            raw_save_specs = meta.get("save_specs", []) if isinstance(meta, dict) else []
+            save_specs = (
+                _normalize_unique_save_specs(raw_save_specs)
+                if isinstance(raw_save_specs, list) and raw_save_specs
+                else []
+            )
             backups.append({
                 "path": str(f), "filename": f.name,
                 "timestamp": meta.get("timestamp", f.stem),
@@ -7432,6 +7624,7 @@ def get_backups(game_ref, limit: Optional[int] = None) -> list:
                 "linked_sync_archive": meta.get("linked_sync_archive", ""),
                 "game_uid": meta.get("game_uid", ""),
                 "storage_key": meta.get("storage_key", ""),
+                "save_specs": save_specs,
             })
             if limit is not None and len(backups) >= limit:
                 break
@@ -7593,7 +7786,7 @@ class GameProcessMonitor:
         self._upload_guards[key] = {
             "reason": bilingual_cfg(
                 self.cfg,
-                "游戏启动后才检测到云端存档更新，为避免覆盖远端，已保护本轮会话并禁止自动上传",
+                "游戏启动后才检测到云端存档更新，为避免覆盖云端，已保护本轮会话并禁止自动上传",
                 "A newer cloud save was detected only after the game had already started. Automatic upload is blocked for this session to avoid overwriting the cloud copy.",
             ),
             "armed_at": datetime.datetime.now().isoformat(timespec="seconds"),
@@ -9041,6 +9234,11 @@ class SteamSaveManager(ctk.CTk):
         kwargs.setdefault("parent", self)
         return filedialog.askopenfilename(**kwargs)
 
+    def _ask_open_filenames(self, **kwargs):
+        self._prepare_dialog_parent()
+        kwargs.setdefault("parent", self)
+        return filedialog.askopenfilenames(**kwargs)
+
     def _input_dialog(self, title: str, text: str) -> str:
         self._prepare_dialog_parent()
         dialog = ctk.CTkInputDialog(text=text, title=title)
@@ -10445,11 +10643,11 @@ class SteamSaveManager(ctk.CTk):
             )
             self._games_empty_label.pack(pady=40)
 
-    def _create_save_paths_editor(self, parent, initial_paths=None, width=420):
+    def _create_save_paths_editor(self, parent, initial_specs=None, width=420):
         state = {"rows": []}
-        initial = _normalize_unique_storage_paths(initial_paths or [])
+        initial = _normalize_unique_save_specs(initial_specs or [], for_storage=True)
         if not initial:
-            initial = [""]
+            initial = [{"base": "", "includes": [], "recursive": True}]
 
         wrap = ctk.CTkFrame(parent, fg_color="transparent")
         wrap.grid_columnconfigure(0, weight=1)
@@ -10460,23 +10658,36 @@ class SteamSaveManager(ctk.CTk):
         ctk.CTkLabel(
             hdr,
             text=self.bi(
-                "可添加多个存档目录，支持 %USERPROFILE% / %APPDATA% / %LOCALAPPDATA%",
-                "You can add multiple save folders. %USERPROFILE% / %APPDATA% / %LOCALAPPDATA% are supported.",
+                "可添加文件夹或指定文件，支持 %USERPROFILE% / %APPDATA% / %LOCALAPPDATA%",
+                "Add folders or specific files. %USERPROFILE% / %APPDATA% / %LOCALAPPDATA% are supported.",
             ),
             font=font(11),
             text_color=C_SUBTLE_TEXT,
+            wraplength=330,
+            justify="left",
         ).grid(row=0, column=0, sticky="w")
         ctk.CTkButton(
             hdr,
             text=self.bi("+ 添加目录", "+ Add Folder"),
-            width=104,
+            width=100,
             height=30,
             font=font(12),
             corner_radius=8,
             fg_color=BTN_PRIMARY,
             hover_color=BTN_PRIMARY_H,
-            command=lambda: _append_row(""),
-        ).grid(row=0, column=1, sticky="e")
+            command=lambda: _append_row({"base": "", "includes": [], "recursive": True}),
+        ).grid(row=0, column=1, padx=(8, 6), sticky="e")
+        ctk.CTkButton(
+            hdr,
+            text=self.bi("+ 添加文件", "+ Add Files"),
+            width=100,
+            height=30,
+            font=font(12),
+            corner_radius=8,
+            fg_color=BTN_BLUE,
+            hover_color=BTN_BLUE_H,
+            command=lambda: _choose_files(),
+        ).grid(row=0, column=2, sticky="e")
 
         rows_frame = ctk.CTkFrame(wrap, fg_color="transparent")
         rows_frame.grid(row=1, column=0, sticky="ew", pady=(8, 0))
@@ -10489,6 +10700,44 @@ class SteamSaveManager(ctk.CTk):
             if chosen:
                 row["var"].set(chosen)
 
+        def _collect_specs():
+            specs = []
+            for row in state["rows"]:
+                base = row["var"].get().strip()
+                if not base:
+                    continue
+                specs.append({
+                    "base": base,
+                    "includes": list(row.get("includes", [])),
+                    "recursive": bool(row.get("recursive", True)),
+                })
+            return _normalize_unique_save_specs(specs, for_storage=True)
+
+        def _replace_rows(specs):
+            state["rows"] = []
+            for spec in specs:
+                state["rows"].append({
+                    "var": ctk.StringVar(value=spec.get("base", "")),
+                    "includes": list(spec.get("includes", [])),
+                    "recursive": bool(spec.get("recursive", True)),
+                })
+            if not state["rows"]:
+                state["rows"].append({
+                    "var": ctk.StringVar(value=""),
+                    "includes": [],
+                    "recursive": True,
+                })
+            _render_rows()
+
+        def _choose_files():
+            chosen = self._ask_open_filenames(
+                title=self.bi("选择一个或多个存档文件", "Choose one or more save files"),
+                filetypes=[(self.bi("全部文件", "All Files"), "*.*")],
+            )
+            if chosen:
+                _replace_rows(_merge_save_specs_with_selected_files(
+                    _collect_specs(), chosen, for_storage=True))
+
         def _set_primary(index: int):
             rows = state["rows"]
             if 0 <= index < len(rows):
@@ -10499,12 +10748,18 @@ class SteamSaveManager(ctk.CTk):
             rows = state["rows"]
             if len(rows) == 1:
                 rows[0]["var"].set("")
+                rows[0]["includes"] = []
+                rows[0]["recursive"] = True
             elif 0 <= index < len(rows):
                 rows.pop(index)
             _render_rows()
 
-        def _append_row(value: str):
-            state["rows"].append({"var": ctk.StringVar(value=value)})
+        def _append_row(spec: dict):
+            state["rows"].append({
+                "var": ctk.StringVar(value=spec.get("base", "")),
+                "includes": list(spec.get("includes", [])),
+                "recursive": bool(spec.get("recursive", True)),
+            })
             _render_rows()
 
         def _render_rows():
@@ -10515,12 +10770,16 @@ class SteamSaveManager(ctk.CTk):
                 row_frame.grid(row=idx, column=0, sticky="ew", pady=(0, 8))
                 row_frame.grid_columnconfigure(1, weight=1)
 
-                badge_text = self.bi("主路径", "Primary") if idx == 0 else self.bi(f"路径 {idx+1}", f"Path {idx+1}")
+                is_file_rule = bool(row.get("includes"))
+                if idx == 0:
+                    badge_text = self.bi("主文件规则", "Primary Files") if is_file_rule else self.bi("主目录", "Primary Folder")
+                else:
+                    badge_text = self.bi("指定文件", "Files") if is_file_rule else self.bi(f"目录 {idx+1}", f"Folder {idx+1}")
                 badge_color = BTN_SUCCESS if idx == 0 else ("#cbd5e1", "#374151")
                 ctk.CTkLabel(
                     row_frame,
                     text=badge_text,
-                    width=64,
+                    width=78,
                     font=font(11, "bold" if idx == 0 else "normal"),
                     text_color=("white" if idx == 0 else C_BODY_TEXT),
                     fg_color=badge_color,
@@ -10534,7 +10793,7 @@ class SteamSaveManager(ctk.CTk):
                     textvariable=row["var"],
                     width=width,
                     font=font(12),
-                    placeholder_text=self.bi("选择存档文件夹", "Choose a save folder"),
+                    placeholder_text=self.bi("存档文件夹或规则基准目录", "Save folder or rule base folder"),
                 )
                 entry.grid(row=0, column=1, padx=(0, 8), pady=10, sticky="ew")
 
@@ -10576,13 +10835,30 @@ class SteamSaveManager(ctk.CTk):
                     command=lambda i=idx: _remove_row(i),
                 ).grid(row=0, column=4, padx=(0, 10), pady=10)
 
-        def _get_paths():
-            return _normalize_unique_storage_paths([row["var"].get() for row in state["rows"]])
+                if is_file_rule:
+                    mode_text = self.bi("包含子目录", "including subfolders") if row.get("recursive", True) else self.bi("仅此目录", "this folder only")
+                    rule_text = self.bi("文件规则", "File rule") + ": " + ", ".join(row["includes"])
+                    ctk.CTkLabel(
+                        row_frame,
+                        text=f"{rule_text}  ·  {mode_text}",
+                        font=font(10),
+                        text_color=C_SUBTLE_TEXT,
+                        anchor="w",
+                        justify="left",
+                        wraplength=500,
+                    ).grid(row=1, column=1, columnspan=4, padx=(0, 10), pady=(0, 9), sticky="w")
+
+        def _get_specs():
+            return _collect_specs()
 
         state["frame"] = wrap
-        state["get_paths"] = _get_paths
-        for value in initial:
-            state["rows"].append({"var": ctk.StringVar(value=value)})
+        state["get_specs"] = _get_specs
+        for spec in initial:
+            state["rows"].append({
+                "var": ctk.StringVar(value=spec.get("base", "")),
+                "includes": list(spec.get("includes", [])),
+                "recursive": bool(spec.get("recursive", True)),
+            })
         _render_rows()
         return state
 
@@ -10591,7 +10867,7 @@ class SteamSaveManager(ctk.CTk):
         is_edit = idx is not None
         g = self.cfg["games"][idx] if is_edit else None
         dlg_title = self.bi("编辑游戏", "Edit Game") if is_edit else self.bi("手动添加游戏", "Add Game Manually")
-        d = self._create_popup(dlg_title, "700x560")
+        d = self._create_popup(dlg_title, "700x600")
         d.grid_columnconfigure(0, weight=1)
         r = 0
         ctk.CTkLabel(d, text=self.bi("游戏名称", "Game Name"), font=font(13)).grid(
@@ -10610,11 +10886,20 @@ class SteamSaveManager(ctk.CTk):
             ae = ctk.CTkEntry(d, width=200, placeholder_text=self.bi("如 1245620", "For example: 1245620"))
             ae.grid(row=r, column=0, padx=24, sticky="w")
             r += 1
-        ctk.CTkLabel(d, text=self.bi("存档路径", "Save Paths"), font=font(13)).grid(
+        ctk.CTkLabel(d, text=self.bi("存档位置", "Save Locations"), font=font(13)).grid(
             row=r, column=0, padx=24, pady=(12, 4), sticky="w")
         r += 1
-        initial_paths = get_game_save_path_templates(g, existing_only=False) if is_edit else None
-        editor = self._create_save_paths_editor(d, initial_paths, width=420)
+        initial_specs = []
+        if is_edit:
+            raw_specs = g.get("save_specs", [])
+            if isinstance(raw_specs, list):
+                initial_specs = _normalize_unique_save_specs(raw_specs, for_storage=True)
+            if not initial_specs:
+                initial_specs = [
+                    _default_save_spec(path, for_storage=True)
+                    for path in get_game_save_path_templates(g, existing_only=False)
+                ]
+        editor = self._create_save_paths_editor(d, initial_specs, width=420)
         editor["frame"].grid(row=r, column=0, padx=24, sticky="ew")
         r += 1
         ctk.CTkLabel(d, text=self.bi("自定义监控程序（可选）", "Custom Monitor Process (Optional)"), font=font(13)).grid(
@@ -10643,11 +10928,12 @@ class SteamSaveManager(ctk.CTk):
                 old_game = dict(self.cfg["games"][idx])
                 old_game["save_paths"] = list(get_game_save_paths(self.cfg["games"][idx], existing_only=False))
                 new_name = ne.get().strip()
-                new_paths = editor["get_paths"]()
-                if not new_name or not new_paths:
-                    self._show_warning(self.bi("提示", "Notice"), self.bi("请填写名称并至少保留一个存档目录", "Please enter a name and keep at least one save folder")); return
+                new_specs = editor["get_specs"]()
+                if not new_name or not new_specs:
+                    self._show_warning(self.bi("提示", "Notice"), self.bi("请填写名称并至少保留一个存档文件夹或文件规则", "Please enter a name and keep at least one save folder or file rule")); return
                 self.cfg["games"][idx]["name"] = new_name
-                set_game_save_paths(self.cfg["games"][idx], new_paths)
+                set_game_save_specs(self.cfg["games"][idx], new_specs)
+                self.cfg["games"][idx]["manual_save_specs"] = True
                 set_game_monitor_processes(self.cfg["games"][idx], pe.get().strip())
                 clear_game_sync_state(self.cfg, old_game)
                 if old_game.get("save_path") and old_game.get("save_path") != self.cfg["games"][idx].get("save_path"):
@@ -10655,12 +10941,13 @@ class SteamSaveManager(ctk.CTk):
                 remember_recognition_path(self.cfg, self.cfg["games"][idx].get("appid", ""), new_name, self.cfg["games"][idx].get("save_path", ""))
             else:
                 n = ne.get().strip()
-                save_paths = editor["get_paths"]()
-                if not n or not save_paths:
-                    self._show_warning(self.bi("提示", "Notice"), self.bi("请填写名称并至少添加一个存档目录", "Please enter a name and add at least one save folder")); return
+                save_specs = editor["get_specs"]()
+                if not n or not save_specs:
+                    self._show_warning(self.bi("提示", "Notice"), self.bi("请填写名称并至少添加一个存档文件夹或文件", "Please enter a name and add at least one save folder or file")); return
                 appid = ae.get().strip()
                 game = {"name": n, "appid": appid, "sync_enabled": True, "favorite": False}
-                set_game_save_paths(game, save_paths)
+                set_game_save_specs(game, save_specs)
+                game["manual_save_specs"] = True
                 set_game_monitor_processes(game, pe.get().strip())
                 ensure_game_storage_identity(game)
                 self.cfg.setdefault("games", []).append(game)
@@ -11102,7 +11389,7 @@ class SteamSaveManager(ctk.CTk):
             self._set_io_busy(True)
             def _worker():
                 try:
-                    targets = get_game_save_specs(game_copy, existing_only=False)
+                    targets = backup.get("save_specs", []) or get_game_save_specs(game_copy, existing_only=False)
                     restore_backup(backup_path, targets if targets else game_copy.get("save_path", ""))
                     self.after(0, lambda: self._on_restore_popup_done(detail_idx, dialog))
                 except Exception as e:
@@ -11945,7 +12232,7 @@ class SteamSaveManager(ctk.CTk):
             self._set_io_busy(True)
             def _worker():
                 try:
-                    targets = get_game_save_specs(game_copy, existing_only=False)
+                    targets = b.get("save_specs", []) or get_game_save_specs(game_copy, existing_only=False)
                     restore_backup(backup_path, targets if targets else game_copy.get("save_path", ""))
                     self.after(0, lambda: self._on_restore_detail_done(detail_idx))
                 except Exception as e:
@@ -12158,16 +12445,13 @@ class SteamSaveManager(ctk.CTk):
             game_ref = b.get("_game_ref", {})
             if isinstance(game_ref, dict):
                 save_paths = get_game_save_paths(game_ref, existing_only=False)
-                save_specs = get_game_save_specs(game_ref, existing_only=False)
                 primary_path = save_paths[0] if save_paths else game_ref.get("save_path", "")
             else:
                 save_paths = []
-                save_specs = []
                 primary_path = ""
             b["game"] = game_ref.get("name", b.get("game", "")) if isinstance(game_ref, dict) else b.get("game", "")
             b["save_path"] = primary_path
             b["save_paths"] = save_paths
-            b["save_specs"] = save_specs
             key = f"{b['game']}::{b['timestamp']}::{b['filename']}"
             active_keys.add(key)
             item = self._backup_rows.get(key)
@@ -12222,7 +12506,11 @@ class SteamSaveManager(ctk.CTk):
                 self.bi(f"还原「{b['game']}」的存档？\n时间：{self._fmt_ts(b['timestamp'])}\n当前存档会自动安全备份",
                         f"Restore the save for {b['game']}?\nTime: {self._fmt_ts(b['timestamp'])}\nYour current save will be backed up automatically first")):
             backup_path = b["path"]
-            targets = b.get("save_specs", []) or [_default_save_spec(path) for path in b.get("save_paths", [])]
+            game_ref = b.get("_game_ref", {})
+            current_specs = get_game_save_specs(game_ref, existing_only=False) if isinstance(game_ref, dict) else []
+            targets = b.get("save_specs", []) or current_specs
+            if not targets:
+                targets = [_default_save_spec(path) for path in b.get("save_paths", [])]
             restore_target = targets if targets else b.get("save_path", "")
             self._set_io_busy(True)
             def _worker():
@@ -13288,7 +13576,7 @@ class SteamSaveManager(ctk.CTk):
                 if not self.cfg.get("games", []):
                     results = [(
                         self.bi("云端存档", "Cloud saves"),
-                        self.bi("未在 WebDAV 远端发现可恢复的同步包", "No recoverable sync archives were found on WebDAV"),
+                        self.bi("未在 WebDAV 云端发现可恢复的同步包", "No recoverable sync archives were found on WebDAV"),
                     )]
                 else:
                     results = sync_all_games(self.cfg)
@@ -13296,7 +13584,7 @@ class SteamSaveManager(ctk.CTk):
                         results.insert(0, (
                             self.bi("云端存档", "Cloud saves"),
                             self.bi(
-                                f"已从 WebDAV 远端发现并加入 {discovered_count} 个游戏",
+                                f"已从 WebDAV 云端发现并加入 {discovered_count} 个游戏",
                                 f"Discovered and added {discovered_count} game(s) from WebDAV",
                             ),
                         ))
