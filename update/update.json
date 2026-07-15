@@ -1,6 +1,6 @@
 {
-  "url": "https://github.com/Kiowx/save_manager/releases/download/v1.5.4/SteamSaveManager.exe",
-  "notes": "1. 修复全新安装后本地缓存为空时无法识别云端存档的问题。\n2. WebDAV 同步会从云端归档恢复游戏信息，并把最新存档拉到本地缓存。\n3. 手动同步也会主动刷新云端缓存，相关中文提示统一使用“云端”。\n4. Fixed cloud saves not being detected on a fresh install when the local cache is empty.\n5. WebDAV sync can rebuild game entries from cloud archives and pull the latest save into the local cache.\n6. Manual sync now refreshes the cloud cache too, and Chinese wording consistently uses cloud terminology.",
-  "sha256": "30dc4a4aac55ca58aff9b406ee3b1a0e3cfb83fa32ea8fbebf4db0ee0b637924",
-  "version": "1.5.4"
+  "version": "1.5.5",
+  "notes": "1. 修复 WebDAV 连接测试未验证下载和清理权限的问题，换设备或清空缓存后会准确提示云端读取失败。[#17](https://github.com/Kiowx/save_manager/issues/17)\n2. 支持直接选择一个或多个存档文件，备份、恢复和同步只处理选中的文件。[#18](https://github.com/Kiowx/save_manager/issues/18)\n3. 保留旧备份与同步包的规则映射，编辑存档规则后仍可安全恢复历史文件。[#18](https://github.com/Kiowx/save_manager/issues/18)\n4. Fixed WebDAV connection tests so download and cleanup permissions are checked, with clear cloud read errors after switching devices or clearing the cache. [#17](https://github.com/Kiowx/save_manager/issues/17)\n5. Added support for selecting one or more save files so backup, restore, and sync only process the chosen files. [#18](https://github.com/Kiowx/save_manager/issues/18)\n6. Preserved rule mappings in existing backups and sync archives so historical files remain safe to restore after editing save rules. [#18](https://github.com/Kiowx/save_manager/issues/18)",
+  "url": "https://github.com/Kiowx/save_manager/releases/download/v1.5.5/SteamSaveManager.exe",
+  "sha256": "52a568da3caf62135465f1ea808383bd7b5bf7849119a769bc36b1283d2c66ff"
 }
