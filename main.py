@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Steam 游戏存档备份管理器 v1.5.5 — 通用版"""
+"""Steam 游戏存档备份管理器 v1.5.6 — 通用版"""
 
 import os
 import sys
@@ -104,7 +104,7 @@ except ImportError as exc:
 # ══════════════════════════════════════════════
 
 APP_NAME = "Steam Save Manager"
-VERSION = "1.5.5"
+VERSION = "1.5.6"
 APP_DIR = Path(os.path.dirname(os.path.abspath(sys.argv[0])))
 LEGACY_CONFIG_DIR = Path.home() / ".steam_save_manager"
 STARTUP_AUTOSTART_FLAG = "--startup-launch"
@@ -1225,7 +1225,7 @@ def get_steam_user_ids(steam_path: str) -> list[str]:
     return sorted(
         [
             d for d in os.listdir(userdata)
-            if os.path.isdir(os.path.join(userdata, d)) and d.isdigit()
+            if os.path.isdir(os.path.join(userdata, d)) and d.isdigit() and d != "0"
         ],
         key=lambda item: int(item),
     )
@@ -1260,7 +1260,7 @@ def get_steam_accounts(steam_path: str) -> list[dict]:
                     if not isinstance(info, dict):
                         continue
                     accountid = _accountid_from_steam64(steam64)
-                    if not accountid:
+                    if not accountid or accountid == "0":
                         continue
                     item = accounts.setdefault(accountid, {
                         "accountid": accountid,
@@ -2098,6 +2098,12 @@ def parse_appinfo_ufs_entries(steam_path: str, appid: str) -> list[dict]:
             continue
 
         clean_path, includes = _split_ufs_path_and_patterns(path_pattern, file_pattern)
+        recursive_value = entry.get("recursive", None)
+        if recursive_value is None or str(recursive_value).strip() == "":
+            recursive = not (includes and not clean_path)
+        else:
+            recursive_raw = str(recursive_value).strip().lower()
+            recursive = recursive_raw not in {"0", "false", "no"}
 
         root_prefix = _APPINFO_ROOT_MAP.get(root)
         if root_prefix is None:
@@ -2106,23 +2112,23 @@ def parse_appinfo_ufs_entries(steam_path: str, appid: str) -> list[dict]:
                 # 不生成路径模板（由 remotecache 步骤处理），但保留 includes/pattern 信息
                 # 这样 remotecache 候选可以继承精确的文件匹配规则
                 if includes:
-                    root0_key = ("__root0__", tuple(p.lower() for p in includes), recursive)
+                    root0_key = (
+                        "__root0__",
+                        clean_path.lower(),
+                        tuple(p.lower() for p in includes),
+                        recursive,
+                    )
                     if root0_key not in seen:
                         seen.add(root0_key)
                         templates.append({
                             "template": "__root0__",
+                            "relative_path": clean_path,
                             "includes": includes,
                             "recursive": recursive,
                             "root_id": "0",
                         })
             continue
         template = f"{root_prefix}/{clean_path}" if clean_path else root_prefix
-        recursive_value = entry.get("recursive", None)
-        if recursive_value is None or str(recursive_value).strip() == "":
-            recursive = not (includes and not clean_path)
-        else:
-            recursive_raw = str(recursive_value).strip().lower()
-            recursive = recursive_raw not in {"0", "false", "no"}
         key = (template, tuple(p.lower() for p in includes), recursive)
         if key not in seen:
             seen.add(key)
@@ -2446,6 +2452,19 @@ def _normalize_save_spec(spec: dict, *, for_storage: bool = False) -> Optional[d
     }
 
 
+def _save_spec_fully_covers(parent: dict, child: dict) -> bool:
+    """Return True only when parent provably includes every file in child."""
+    if parent.get("includes") or not parent.get("recursive", True):
+        return False
+    parent_base = expand_save_path_vars(parent.get("base", ""))
+    child_base = expand_save_path_vars(child.get("base", ""))
+    if not parent_base or not child_base:
+        return False
+    if os.path.normcase(parent_base) == os.path.normcase(child_base):
+        return False
+    return _path_is_within(child_base, parent_base)
+
+
 def _normalize_unique_save_specs(specs: list[dict], *, for_storage: bool = False) -> list[dict]:
     normalized = []
     seen = set()
@@ -2476,6 +2495,19 @@ def _normalize_unique_save_specs(specs: list[dict], *, for_storage: bool = False
             )
         ]
     return normalized
+
+
+def _collapse_fully_covered_save_specs(
+        specs: list[dict], *, for_storage: bool = False) -> list[dict]:
+    """Collapse scanner-produced parent/child specs without changing legacy mappings."""
+    normalized = _normalize_unique_save_specs(specs, for_storage=for_storage)
+    return [
+        spec for idx, spec in enumerate(normalized)
+        if not any(
+            other_idx != idx and _save_spec_fully_covers(other, spec)
+            for other_idx, other in enumerate(normalized)
+        )
+    ]
 
 
 def _merge_save_specs_with_selected_files(specs: list[dict], file_paths,
@@ -2756,6 +2788,367 @@ def game_matches_save_target(existing_game: Optional[dict], appid: str,
     return _normalize_unique_paths(get_game_save_paths(existing_game, existing_only=False)) == _normalize_unique_paths(save_paths or [])
 
 
+_SCAN_AUTOMATION_TRUSTED_SOURCES = {
+    "confirmed", "manual", "known-path", "remotecache", "steamdb", "appinfo",
+}
+_SCAN_CONFIDENCE_RANK = {"low": 0, "medium": 1, "high": 2}
+
+
+def _scan_absolute_path(path: str) -> str:
+    expanded = expand_save_path_vars(path)
+    if not expanded:
+        return ""
+    return os.path.normcase(os.path.realpath(os.path.abspath(expanded)))
+
+
+def _scan_paths_equal(left: str, right: str) -> bool:
+    left_key = _scan_absolute_path(left)
+    right_key = _scan_absolute_path(right)
+    return bool(left_key and right_key and left_key == right_key)
+
+
+def _literal_save_spec_patterns(spec: dict) -> Optional[list[tuple[str, str, bool]]]:
+    includes = spec.get("includes", [])
+    if not includes:
+        return None
+    patterns = []
+    for pattern in includes:
+        clean = str(pattern or "").replace("\\", "/").strip().lstrip("./").lower()
+        if not clean or glob.has_magic(clean):
+            return None
+        patterns.append((clean, clean.rsplit("/", 1)[-1], "/" not in clean))
+    return patterns or None
+
+
+def _save_specs_proven_disjoint_same_base(left: dict, right: dict) -> bool:
+    """Prove that two literal include sets on one directory cannot select one file."""
+    if not _scan_paths_equal(left.get("base", ""), right.get("base", "")):
+        return False
+    left_patterns = _literal_save_spec_patterns(left)
+    right_patterns = _literal_save_spec_patterns(right)
+    if left_patterns is None or right_patterns is None:
+        return False
+    left_recursive = bool(left.get("recursive", True))
+    right_recursive = bool(right.get("recursive", True))
+    for left_path, left_name, left_is_name in left_patterns:
+        for right_path, right_name, right_is_name in right_patterns:
+            if left_path == right_path:
+                return False
+            if left_recursive and left_is_name and left_name == right_name:
+                return False
+            if right_recursive and right_is_name and left_name == right_name:
+                return False
+    return True
+
+
+def _save_specs_block_scan_merge(incoming: dict, existing: dict) -> bool:
+    if _scan_paths_equal(incoming.get("base", ""), existing.get("base", "")):
+        incoming_key = (
+            tuple(sorted(pattern.lower() for pattern in incoming.get("includes", []))),
+            bool(incoming.get("recursive", True)),
+        )
+        existing_key = (
+            tuple(sorted(pattern.lower() for pattern in existing.get("includes", []))),
+            bool(existing.get("recursive", True)),
+        )
+        if incoming_key == existing_key:
+            return True
+        return not incoming.get("includes") or not existing.get("includes")
+    return bool(
+        _save_spec_fully_covers(incoming, existing)
+        or _save_spec_fully_covers(existing, incoming)
+    )
+
+
+def _steam_userdata_relative_parts(path: str, steam_path: str) -> Optional[list[str]]:
+    steam_norm = os.path.normpath(steam_path) if steam_path else ""
+    roots = [
+        os.path.join(steam_norm, "userdata") if steam_norm else "",
+        steam_norm if steam_norm and os.path.basename(steam_norm).lower() == "userdata" else "",
+        os.path.join(os.path.dirname(steam_norm), "userdata") if steam_norm else "",
+        os.path.join(os.path.dirname(os.path.dirname(steam_norm)), "userdata") if steam_norm else "",
+        os.path.join(str(LOCAL_APPDATA), "Steam", "userdata"),
+        os.path.join(r"C:\Program Files (x86)\Steam", "userdata"),
+        os.path.join(r"C:\Program Files\Steam", "userdata"),
+    ]
+    path_abs = _scan_absolute_path(path)
+    for root in roots:
+        root_abs = _scan_absolute_path(root)
+        if not root_abs or not _path_is_within(path_abs, root_abs):
+            continue
+        relative = os.path.relpath(path_abs, root_abs)
+        if relative == ".":
+            return []
+        return [part.lower() for part in Path(relative).parts]
+    return None
+
+
+def _scan_path_safety_reason(path: str, spec: dict, *,
+                             install_dir: str = "", steam_path: str = "",
+                             library_path: str = "",
+                             cfg: Optional[dict] = None) -> str:
+    path_abs = _scan_absolute_path(path)
+    if not path_abs:
+        return "empty-path"
+
+    path_parts = [part.lower() for part in Path(path_abs).parts]
+    userdata_tail = _steam_userdata_relative_parts(path_abs, steam_path)
+    if userdata_tail is not None:
+        if userdata_tail and userdata_tail[0] == "0":
+            return "steam-userdata-uid-0"
+        if len(userdata_tail) <= 1:
+            return "steam-userdata-root"
+        if len(userdata_tail) == 2 and not spec.get("includes") and spec.get("recursive", True):
+            return "steam-app-root-unfiltered"
+
+    if any(re.search(r"_pre_restore_\d{8}_\d{6}", part) for part in path_parts):
+        return "restore-safety-path"
+
+    descendant_roots = [
+        str(CONFIG_DIR),
+        str(BACKUP_ROOT),
+        str((cfg or {}).get("backup_path", "") or ""),
+        str((cfg or {}).get("sync_folder", "") or ""),
+    ]
+    for root in descendant_roots:
+        root_abs = _scan_absolute_path(root)
+        if root_abs and (
+            _path_is_within(path_abs, root_abs)
+            or _path_is_within(root_abs, path_abs)
+        ):
+            return "managed-storage-root"
+
+    exact_roots = [
+        str(APP_DIR),
+        steam_path,
+        library_path,
+        os.path.join(steam_path, "userdata") if steam_path else "",
+        os.path.join(steam_path, "steamapps") if steam_path else "",
+        os.path.join(steam_path, "steamapps", "common") if steam_path else "",
+        os.path.join(library_path, "steamapps") if library_path else "",
+        os.path.join(library_path, "steamapps", "common") if library_path else "",
+        str(USER_HOME),
+        str(APPDATA),
+        str(LOCAL_APPDATA),
+        str(LOCAL_LOW),
+        str(DOCUMENTS),
+        str(SAVED_GAMES),
+        str(PROGRAMDATA),
+        str(PUBLIC_DOCUMENTS),
+    ]
+    for root in exact_roots:
+        if root and _scan_paths_equal(path_abs, root):
+            return "broad-system-root"
+
+    volume_root = _get_volume_root(path_abs)
+    if volume_root and _scan_paths_equal(path_abs, volume_root):
+        return "volume-root"
+
+    if install_dir:
+        if _scan_paths_equal(path_abs, install_dir):
+            includes = {
+                str(pattern or "").replace("\\", "/").strip().lower()
+                for pattern in spec.get("includes", [])
+                if str(pattern or "").strip()
+            }
+            broad_patterns = {"*", "*.*", "**", "**/*"}
+            if (
+                not includes
+                or includes & broad_patterns
+                or spec.get("recursive", True)
+            ):
+                return "install-root-requires-precise-includes"
+        elif _path_is_within(install_dir, path_abs):
+            return "install-ancestor"
+    return ""
+
+
+def find_scan_path_conflict(games: list[dict], appid: str,
+                            specs: list[dict]) -> Optional[dict]:
+    target_appid = str(appid or "").strip()
+    target_specs = _normalize_unique_save_specs(specs)
+    for game in games or []:
+        if not isinstance(game, dict):
+            continue
+        existing_appid = str(game.get("appid", "") or "").strip()
+        if not existing_appid or existing_appid == target_appid:
+            continue
+        for existing_spec in get_game_save_specs(game, existing_only=False):
+            for target_spec in target_specs:
+                same_base = _scan_paths_equal(
+                    existing_spec.get("base", ""),
+                    target_spec.get("base", ""),
+                )
+                if same_base and _save_specs_proven_disjoint_same_base(
+                        existing_spec, target_spec):
+                    continue
+                if same_base or _save_spec_fully_covers(
+                        existing_spec, target_spec) or _save_spec_fully_covers(
+                            target_spec, existing_spec):
+                    return game
+    return None
+
+
+def validate_scan_save_specs(*, appid: str, selected_path: str,
+                             save_specs: Optional[list[dict]] = None,
+                             save_paths: Optional[list[str]] = None,
+                             install_dir: str = "", steam_path: str = "",
+                             library_path: str = "",
+                             cfg: Optional[dict] = None) -> tuple[list[dict], str]:
+    raw_specs = list(save_specs or [])
+    if not raw_specs:
+        raw_specs = [_default_save_spec(path) for path in (save_paths or []) if path]
+    normalized = _normalize_unique_save_specs(raw_specs)
+    if not normalized:
+        return [], "no-save-specs"
+
+    selected_probe = _default_save_spec(selected_path) if selected_path else None
+    selected_covered = not selected_probe
+    safe_specs = []
+    for spec in normalized:
+        reason = _scan_path_safety_reason(
+            spec.get("base", ""),
+            spec,
+            install_dir=install_dir,
+            steam_path=steam_path,
+            library_path=library_path,
+            cfg=cfg,
+        )
+        covers_selected = bool(
+            selected_probe and (
+                _scan_paths_equal(spec.get("base", ""), selected_path)
+                or _save_spec_fully_covers(spec, selected_probe)
+            )
+        )
+        if reason:
+            if covers_selected:
+                return [], reason
+            continue
+        safe_specs.append(spec)
+        selected_covered = selected_covered or covers_selected
+
+    safe_specs = _collapse_fully_covered_save_specs(safe_specs)
+    if not safe_specs or not selected_covered:
+        return [], "selected-path-rejected"
+    conflict = find_scan_path_conflict(
+        list((cfg or {}).get("games", [])),
+        appid,
+        safe_specs,
+    )
+    if conflict:
+        return [], f"path-used-by-appid:{str(conflict.get('appid', '') or '').strip()}"
+    return safe_specs, ""
+
+
+def scan_candidate_enables_automation(candidate: Optional[dict],
+                                      user_confirmed: bool) -> bool:
+    candidate = candidate or {}
+    return bool(
+        user_confirmed
+        and candidate.get("confidence") == "high"
+        and candidate.get("source") in _SCAN_AUTOMATION_TRUSTED_SOURCES
+        and candidate.get("materialized", True)
+    )
+
+
+def apply_scanned_game_metadata(game: dict, candidate: Optional[dict],
+                                user_confirmed: bool) -> None:
+    candidate = candidate or {}
+    automation_enabled = scan_candidate_enables_automation(candidate, user_confirmed)
+    game["scan_generated"] = True
+    game["scan_source"] = str(candidate.get("source", "") or "")
+    game["scan_confidence"] = str(candidate.get("confidence", "low") or "low")
+    game["scan_confirmed"] = bool(user_confirmed)
+    game["auto_backup"] = automation_enabled
+    game["sync_enabled"] = automation_enabled
+
+
+def is_scan_generated_game(game: Optional[dict]) -> bool:
+    if not isinstance(game, dict) or game.get("manual_save_specs"):
+        return False
+    if game.get("scan_generated"):
+        return True
+    return bool(game.get("appid") and game.get("library_path"))
+
+
+def merge_scanned_game_record(games: list[dict], incoming: dict,
+                              cfg: Optional[dict] = None) -> tuple[str, dict]:
+    appid = str(incoming.get("appid", "") or "").strip()
+    existing = next(
+        (
+            game for game in games
+            if str(game.get("appid", "") or "").strip() == appid
+            and is_scan_generated_game(game)
+        ),
+        None,
+    )
+    if existing is None:
+        duplicate = next(
+            (
+                game for game in games
+                if game_matches_save_target(
+                    game,
+                    appid,
+                    save_specs=get_game_save_specs(incoming, existing_only=False),
+                )
+            ),
+            None,
+        )
+        if duplicate is not None:
+            return "unchanged", duplicate
+        games.append(incoming)
+        return "added", incoming
+
+    old_game = dict(existing)
+    old_specs = get_game_save_specs(existing, existing_only=False)
+    incoming_specs = get_game_save_specs(incoming, existing_only=False)
+    mergeable_specs = [
+        spec for spec in incoming_specs
+        if not any(_save_specs_block_scan_merge(spec, old_spec) for old_spec in old_specs)
+    ]
+    if not mergeable_specs:
+        return "unchanged", existing
+    merged_specs = _collapse_fully_covered_save_specs(
+        old_specs + mergeable_specs
+    )
+    changed = _normalize_spec_signature(old_specs) != _normalize_spec_signature(merged_specs)
+    if changed:
+        set_game_save_specs(existing, merged_specs)
+
+    for key in ("library_path", "scan_source"):
+        if not existing.get(key) and incoming.get(key):
+            existing[key] = incoming[key]
+            changed = True
+    if not existing.get("scan_generated"):
+        existing["scan_generated"] = True
+        changed = True
+    combined_confirmed = bool(
+        existing.get("scan_confirmed", False) and incoming.get("scan_confirmed", False)
+    )
+    if existing.get("scan_confirmed") != combined_confirmed:
+        existing["scan_confirmed"] = combined_confirmed
+        changed = True
+    confidence = min(
+        (
+            str(existing.get("scan_confidence", "low") or "low"),
+            str(incoming.get("scan_confidence", "low") or "low"),
+        ),
+        key=lambda value: _SCAN_CONFIDENCE_RANK.get(value, 0),
+    )
+    if existing.get("scan_confidence") != confidence:
+        existing["scan_confidence"] = confidence
+        changed = True
+    for key in ("auto_backup", "sync_enabled"):
+        combined = bool(existing.get(key, False) and incoming.get(key, False))
+        if existing.get(key) != combined:
+            existing[key] = combined
+            changed = True
+    ensure_game_storage_identity(existing)
+    if changed and cfg is not None:
+        clear_game_sync_state(cfg, old_game)
+    return ("merged" if changed else "unchanged"), existing
+
+
 def get_game_cache_key(game_or_name) -> str:
     if isinstance(game_or_name, dict):
         storage_key = str(game_or_name.get("storage_key", "") or "").strip()
@@ -2822,6 +3215,7 @@ def _save_specs_match_path(specs: list[dict], abs_path: str) -> bool:
 
 
 def iter_save_spec_files(specs: list[dict]):
+    seen_files = set()
     for idx, spec in enumerate(_normalize_unique_save_specs(specs), start=1):
         base = Path(spec["base"])
         if not base.is_dir():
@@ -2837,7 +3231,66 @@ def iter_save_spec_files(specs: list[dict]):
                 if _is_ignored_save_payload_file(rel):
                     continue
                 if _save_spec_match_relpath(spec, rel):
+                    file_key = os.path.normcase(os.path.realpath(str(abs_f)))
+                    if file_key in seen_files:
+                        continue
+                    seen_files.add(file_key)
                     yield idx, spec, abs_f, rel
+
+
+def save_specs_metadata_signature(specs: list[dict]) -> tuple:
+    """Return a lightweight, deterministic signature without reading file contents."""
+    entries = []
+    for idx, _, abs_f, rel in iter_save_spec_files(specs):
+        st = abs_f.stat()
+        entries.append((
+            idx,
+            rel,
+            int(st.st_size),
+            int(getattr(st, "st_mtime_ns", int(st.st_mtime * 1_000_000_000))),
+        ))
+    entries.sort(key=lambda item: (item[0], item[1].lower(), item[1]))
+    return tuple(entries)
+
+
+def wait_for_save_metadata_stable(
+        specs: list[dict], *,
+        stable_samples: int = 3,
+        interval: float = 1.0,
+        timeout: float = 20.0,
+        stop_event: Optional[threading.Event] = None,
+        signature_func=None,
+        clock=None) -> Optional[tuple]:
+    """Wait until consecutive metadata-only snapshots agree."""
+    signature_func = signature_func or save_specs_metadata_signature
+    clock = clock or time.monotonic
+    required = max(2, int(stable_samples))
+    interval = max(0.0, float(interval))
+    deadline = clock() + max(0.0, float(timeout))
+    previous = signature_func(specs)
+    stable_count = 1
+
+    while stable_count < required:
+        remaining = deadline - clock()
+        if remaining <= 0:
+            return None
+        wait_s = min(interval, remaining)
+        if stop_event is not None:
+            if stop_event.wait(wait_s):
+                return None
+        elif wait_s > 0:
+            time.sleep(wait_s)
+        current = signature_func(specs)
+        if current == previous:
+            stable_count += 1
+        else:
+            previous = current
+            stable_count = 1
+    return previous
+
+
+class SaveSourceChangedError(OSError):
+    """Raised when a save set changes while an archive is being created."""
 
 
 def _streaming_file_hash(file_path: str, hasher) -> None:
@@ -3609,34 +4062,32 @@ def inspect_save_candidate(path: str, game_name: str = "",
 
 
 def has_install_root_save_files(path: str) -> bool:
-    if not path or not os.path.isdir(path):
-        return False
-    signals = _gather_candidate_file_signals(path, max_depth=0, max_files=40)
-    strong_hits = int(signals.get("strong_names", 0)) + int(signals.get("strong_exts", 0))
-    weak_hits = int(signals.get("weak_names", 0)) + int(signals.get("weak_exts", 0))
-    # 收紧判定：至少需要 1 个强信号，或需要同时有弱文件名 + 弱扩展名信号
-    # 避免仅凭 .dat/.bin 等通用扩展名就把安装目录当存档目录
-    return strong_hits >= 1 or (int(signals.get("weak_names", 0)) >= 1 and int(signals.get("weak_exts", 0)) >= 1)
+    return bool(infer_install_root_file_specs(path))
 
 
 def infer_install_root_file_specs(path: str) -> list[dict]:
     """从安装目录根文件中推断精确文件规则，避免整目录打包。"""
     if not path or not os.path.isdir(path):
         return []
-    ext_counts: dict[str, int] = {}
+    includes = []
     try:
         for item in os.scandir(path):
             if not item.is_file():
                 continue
-            _, ext = os.path.splitext(item.name.lower())
-            if ext in STRONG_SAVE_FILE_EXTENSIONS:
-                ext_counts[ext] = ext_counts.get(ext, 0) + 1
+            lower = item.name.lower()
+            stem, ext = os.path.splitext(lower)
+            has_strong_name = any(hint in stem for hint in STRONG_SAVE_FILE_HINTS)
+            if ext not in STRONG_SAVE_FILE_EXTENSIONS and not (
+                has_strong_name and ext in SAVE_FILE_EXTENSIONS
+            ):
+                continue
+            includes.append(glob.escape(item.name).replace("\\", "/"))
     except OSError:
         return []
 
-    includes = [f"*{ext}" for ext, _ in sorted(ext_counts.items(), key=lambda kv: (-kv[1], kv[0]))]
     if not includes:
         return []
+    includes.sort(key=str.lower)
     return _normalize_unique_save_specs([{
         "base": os.path.normpath(path),
         "includes": includes,
@@ -3878,7 +4329,7 @@ def get_remotecache_entries(appid: str, steam_path: str,
     ]
     for userdata_root in get_steam_userdata_roots(steam_path):
         user_ids = [d for d in os.listdir(userdata_root)
-                    if os.path.isdir(os.path.join(userdata_root, d)) and d.isdigit()]
+                    if os.path.isdir(os.path.join(userdata_root, d)) and d.isdigit() and d != "0"]
         prioritized = [aid for aid in preferred_accountids if aid in user_ids]
         if prioritized:
             user_ids = prioritized + [uid for uid in user_ids if uid not in prioritized]
@@ -4022,6 +4473,18 @@ def detect_save_candidates(appid: str, game_name: str,
         exists_flag = os.path.exists(norm)
         if not norm or norm in blacklist or (not exists_flag and not allow_missing):
             return
+        safe_specs, safety_issue = validate_scan_save_specs(
+            appid=appid,
+            selected_path=norm,
+            save_specs=save_specs,
+            save_paths=[norm],
+            install_dir=install_dir,
+            steam_path=steam_path,
+            library_path=library_path,
+            cfg=cfg,
+        )
+        if safety_issue:
+            return
         if exists_flag:
             detail = inspect_save_candidate(norm, game_name, install_dir)
         else:
@@ -4045,8 +4508,8 @@ def detect_save_candidates(appid: str, game_name: str,
         }
         if accountid:
             entry["accountid"] = str(accountid).strip()
-        if save_specs:
-            entry["save_specs"] = _normalize_unique_save_specs(save_specs)
+        if safe_specs:
+            entry["save_specs"] = safe_specs
         if existing is None:
             scored[norm] = entry
             return
@@ -4054,9 +4517,9 @@ def detect_save_candidates(appid: str, game_name: str,
         existing["materialized"] = bool(existing.get("materialized", True) or exists_flag)
         if accountid and not existing.get("accountid"):
             existing["accountid"] = str(accountid).strip()
-        if save_specs:
+        if safe_specs:
             existing["save_specs"] = _normalize_unique_save_specs(
-                list(existing.get("save_specs", []) or []) + list(entry.get("save_specs", []) or [])
+                list(existing.get("save_specs", []) or []) + list(safe_specs)
             )
         if total > existing["score"]:
             existing["score"] = total
@@ -4079,6 +4542,18 @@ def detect_save_candidates(appid: str, game_name: str,
         exists_flag = os.path.exists(norm)
         if not norm or norm in blacklist or (not exists_flag and not allow_missing):
             return
+        safe_specs, safety_issue = validate_scan_save_specs(
+            appid=appid,
+            selected_path=norm,
+            save_specs=save_specs,
+            save_paths=[norm],
+            install_dir=install_dir,
+            steam_path=steam_path,
+            library_path=library_path,
+            cfg=cfg,
+        )
+        if safety_issue:
+            return
         if exists_flag:
             detail = inspect_save_candidate(norm, game_name, install_dir)
         else:
@@ -4100,24 +4575,29 @@ def detect_save_candidates(appid: str, game_name: str,
             "reasons": ["steamdb"] + detail["reasons"],
             "materialized": exists_flag,
         }
-        if save_specs:
-            entry["save_specs"] = _normalize_unique_save_specs(save_specs)
+        if safe_specs:
+            entry["save_specs"] = safe_specs
         if existing is None:
             steamdb_candidates[norm] = entry
             return
         existing["reasons"] = list(dict.fromkeys(list(existing.get("reasons", [])) + entry["reasons"]))
         existing["materialized"] = bool(existing.get("materialized", True) or exists_flag)
-        if save_specs:
+        if safe_specs:
             existing["save_specs"] = _normalize_unique_save_specs(
-                list(existing.get("save_specs", []) or []) + list(entry.get("save_specs", []) or [])
+                list(existing.get("save_specs", []) or []) + list(safe_specs)
             )
         if total > existing["score"]:
             existing["score"] = total
             existing["confidence"] = detail["confidence"]
 
+    appinfo_root0_entries = []
+
     # 1a) 本地 appinfo.vdf UFS 线索（离线，无需联网）
     if str(appid or "").strip() and steam_path:
         for appinfo_entry in parse_appinfo_ufs_entries(steam_path, appid):
+            if appinfo_entry.get("root_id") == "0":
+                appinfo_root0_entries.append(appinfo_entry)
+                continue
             template = appinfo_entry.get("template", "")
             for path in expand_steamdb_template(
                 template, appid, install_dir, steam_path, library_path, preferred_accountids, include_missing=True
@@ -4129,13 +4609,13 @@ def detect_save_candidates(appid: str, game_name: str,
                 }]
                 _add(path, 94, "appinfo", save_specs=save_specs, allow_missing=True)
 
-    if install_dir and has_install_root_save_files(install_dir):
-        inferred_root_specs = infer_install_root_file_specs(install_dir)
+    inferred_root_specs = infer_install_root_file_specs(install_dir) if install_dir else []
+    if inferred_root_specs:
         _add(
             install_dir,
             96 if steamdb_enabled else 90,
             "install-root-files",
-            save_specs=inferred_root_specs or None,
+            save_specs=inferred_root_specs,
         )
 
     # 1b) SteamDB Cloud Save / UFS 线索（可选，需联网，优先模式）
@@ -4197,6 +4677,26 @@ def detect_save_candidates(appid: str, game_name: str,
         for path in local_candidates:
             _add(path, score_remotecache_candidate(path), "remotecache", accountid=entry.get("accountid", ""))
         if entry["remote_dir"]:
+            for root0_entry in appinfo_root0_entries:
+                relative_path = str(root0_entry.get("relative_path", "") or "").strip()
+                root0_path = os.path.normpath(
+                    os.path.join(entry["remote_dir"], relative_path)
+                    if relative_path else entry["remote_dir"]
+                )
+                if not _path_is_within(root0_path, entry["remote_dir"]):
+                    continue
+                root0_specs = [{
+                    "base": root0_path,
+                    "includes": list(root0_entry.get("includes", [])),
+                    "recursive": root0_entry.get("recursive", True),
+                }]
+                _add(
+                    root0_path,
+                    96,
+                    "appinfo",
+                    save_specs=root0_specs,
+                    accountid=entry.get("accountid", ""),
+                )
             # 如果已还原出真实本地路径，remote 目录只作低优先级备选
             # 如果没有本地候选，remote 目录可能是 API 型游戏的真实存档位置
             remote_score = 78 if has_local_candidates else 108
@@ -7147,6 +7647,59 @@ def _atomic_zip_path(final_path: Path | str) -> Path:
     return final.with_name(f".{final.stem}.{os.getpid()}.{threading.get_ident()}.{uuid.uuid4().hex}.tmp")
 
 
+def _is_network_path(path: Path | str) -> bool:
+    raw = str(path or "").strip()
+    if raw.startswith("\\\\") or raw.startswith("//"):
+        return True
+    if sys.platform != "win32":
+        return False
+    try:
+        return classify_storage_path(raw) == "network"
+    except Exception:
+        return False
+
+
+def _local_zip_stage_path(final_path: Path | str) -> Path:
+    final = Path(final_path)
+    stage_dir = Path(tempfile.gettempdir()) / "SteamSaveManager" / "backup_staging"
+    stage_dir.mkdir(parents=True, exist_ok=True)
+    fd, stage_path = tempfile.mkstemp(
+        prefix=f".{final.stem}.",
+        suffix=".zip.tmp",
+        dir=str(stage_dir),
+    )
+    os.close(fd)
+    return Path(stage_path)
+
+
+def _commit_staged_zip(staged_zip: Path, final_zip: Path):
+    target_temp = _atomic_zip_path(final_zip)
+    try:
+        shutil.copyfile(staged_zip, target_temp)
+        if target_temp.stat().st_size != staged_zip.stat().st_size:
+            raise OSError(f"staged ZIP size mismatch for {final_zip}")
+        target_temp.replace(final_zip)
+    finally:
+        try:
+            target_temp.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+
+def _write_json_atomic(path: Path | str, payload: dict):
+    final_path = Path(path)
+    temp_path = _atomic_zip_path(final_path)
+    try:
+        with open(temp_path, "w", encoding="utf-8") as file_obj:
+            json.dump(payload, file_obj, ensure_ascii=False, indent=2)
+        temp_path.replace(final_path)
+    finally:
+        try:
+            temp_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+
 def _zip_write_file(zf: zipfile.ZipFile, file_path: Path | str, arcname: Path | str):
     src_path = Path(file_path)
     arcname_str = Path(arcname).as_posix()
@@ -7220,12 +7773,19 @@ def load_json_file_tolerant(path: Path | str, default=None, repair: bool = True)
     return obj
 
 
-def create_backup(game: dict, note: str = "", extra_meta: Optional[dict] = None) -> Optional[str]:
+def create_backup(game: dict, note: str = "", extra_meta: Optional[dict] = None, *,
+                  expected_source_signature: Optional[tuple] = None) -> Optional[str]:
     with SAVE_IO_LOCK:
-        return _create_backup_impl(game, note, extra_meta)
+        return _create_backup_impl(
+            game,
+            note,
+            extra_meta,
+            expected_source_signature=expected_source_signature,
+        )
 
 
-def _create_backup_impl(game: dict, note: str = "", extra_meta: Optional[dict] = None) -> Optional[str]:
+def _create_backup_impl(game: dict, note: str = "", extra_meta: Optional[dict] = None, *,
+                        expected_source_signature: Optional[tuple] = None) -> Optional[str]:
     save_specs = get_game_save_specs(game, existing_only=True)
     if not save_specs:
         return None
@@ -7244,7 +7804,9 @@ def _create_backup_impl(game: dict, note: str = "", extra_meta: Optional[dict] =
         zip_path = game_dir / f"{ts}_{suffix}.zip"
         suffix += 1
     is_multi = len(save_specs) > 1
-    temp_zip_path = _atomic_zip_path(zip_path)
+    network_target = _is_network_path(zip_path)
+    temp_zip_path = _local_zip_stage_path(zip_path) if network_target else _atomic_zip_path(zip_path)
+    meta_path = zip_path.with_suffix(".meta.json")
     file_count = 0
     try:
         with _open_zip_for_write(temp_zip_path) as zf:
@@ -7259,27 +7821,39 @@ def _create_backup_impl(game: dict, note: str = "", extra_meta: Optional[dict] =
             except Exception:
                 pass
             return None
-        temp_zip_path.replace(zip_path)
-    except Exception:
+        if expected_source_signature is not None:
+            current_signature = save_specs_metadata_signature(save_specs)
+            if current_signature != expected_source_signature:
+                raise SaveSourceChangedError("save files changed while the backup was being created")
+        meta = {
+            "game": game["name"], "appid": game.get("appid", ""),
+            "game_uid": get_game_uid(game),
+            "storage_key": storage_key,
+            "timestamp": ts, "note": note,
+            "source": str(save_paths[0]), "sources": save_paths,
+            "save_specs": _normalize_unique_save_specs(save_specs),
+            "multi_path": is_multi,
+            "size": temp_zip_path.stat().st_size,
+        }
+        if isinstance(extra_meta, dict):
+            meta.update(extra_meta)
+        _write_json_atomic(meta_path, meta)
+        try:
+            if network_target:
+                _commit_staged_zip(temp_zip_path, zip_path)
+            else:
+                temp_zip_path.replace(zip_path)
+        except Exception:
+            try:
+                meta_path.unlink(missing_ok=True)
+            except Exception as cleanup_error:
+                logger.warning("清理未完成备份元数据失败 %s: %s", meta_path, cleanup_error)
+            raise
+    finally:
         try:
             temp_zip_path.unlink(missing_ok=True)
         except Exception:
             pass
-        raise
-    meta = {
-        "game": game["name"], "appid": game.get("appid", ""),
-        "game_uid": get_game_uid(game),
-        "storage_key": storage_key,
-        "timestamp": ts, "note": note,
-        "source": str(save_paths[0]), "sources": save_paths,
-        "save_specs": _normalize_unique_save_specs(save_specs),
-        "multi_path": is_multi,
-        "size": zip_path.stat().st_size,
-    }
-    if isinstance(extra_meta, dict):
-        meta.update(extra_meta)
-    with open(zip_path.with_suffix(".meta.json"), "w", encoding="utf-8") as f:
-        json.dump(meta, f, ensure_ascii=False, indent=2)
     enforce_backup_limits(game)
     return str(zip_path)
 
@@ -8485,8 +9059,23 @@ class SaveChangeHandler(FileSystemEventHandler):
         self._last_backup = 0
         self._quiet_delay = 2.5
         self._timer = None
+        self._timer_generation = 0
         self._timer_lock = threading.Lock()
         self._specs = get_game_save_specs(game, existing_only=False)
+        self._pending = False
+        self._backup_running = False
+        self._closed = False
+        self._last_event_at = 0.0
+        self._stop_event = threading.Event()
+        self._stable_samples = 3
+        self._stable_interval = 1.0
+        self._settle_timeout = 20.0
+        self._backup_attempts = 3
+        self._retry_backoff = (1.0, 2.0)
+        self._failure_retry_delay = 30.0
+        self._retryable_failure = False
+        self._clock = time.monotonic
+        self._timer_factory = threading.Timer
 
     def on_modified(self, event):
         self._handle_event(event)
@@ -8494,40 +9083,176 @@ class SaveChangeHandler(FileSystemEventHandler):
     def on_created(self, event):
         self._handle_event(event)
 
+    def on_moved(self, event):
+        self._handle_event(event)
+
+    def on_deleted(self, event):
+        self._handle_event(event)
+
     def _handle_event(self, event):
         if getattr(event, "is_directory", False):
             return
-        src_path = getattr(event, "src_path", "") or ""
-        if not src_path:
+        paths = [
+            getattr(event, "src_path", "") or "",
+            getattr(event, "dest_path", "") or "",
+        ]
+        paths = [path for path in paths if path]
+        if not paths:
             return
-        if self._specs and not _save_specs_match_path(self._specs, src_path):
+        if self._specs and not any(_save_specs_match_path(self._specs, path) for path in paths):
             return
         self._schedule_backup()
 
     def _schedule_backup(self):
+        now = self._clock()
         with self._timer_lock:
+            if self._closed:
+                return
+            self._pending = True
+            self._last_event_at = now
+            if self._backup_running:
+                return
+            self._arm_timer_locked(self._quiet_delay)
+
+    def _arm_timer_locked(self, delay: float):
+        if self._closed:
+            return
+        if self._timer:
+            try:
+                self._timer.cancel()
+            except Exception:
+                pass
+        self._timer_generation += 1
+        generation = self._timer_generation
+        self._timer = self._timer_factory(
+            max(0.0, float(delay)),
+            lambda: self._try_backup(generation),
+        )
+        self._timer.daemon = True
+        self._timer.start()
+
+    def _next_eligible_delay_locked(self, now: float) -> float:
+        quiet_until = self._last_event_at + self._quiet_delay
+        cooldown_until = self._last_backup + self.cooldown if self._last_backup else now
+        return max(0.0, quiet_until - now, cooldown_until - now)
+
+    def _perform_backup_with_retry(self) -> bool:
+        note = localize_backup_note("文件变动自动备份", cfg_language(self.cfg))
+        last_error = None
+        self._retryable_failure = False
+        for attempt in range(max(1, int(self._backup_attempts))):
+            if self._stop_event.is_set():
+                return False
+            try:
+                specs = get_game_save_specs(self.game, existing_only=True)
+                if not specs:
+                    return False
+                stable_signature = wait_for_save_metadata_stable(
+                    specs,
+                    stable_samples=self._stable_samples,
+                    interval=self._stable_interval,
+                    timeout=self._settle_timeout,
+                    stop_event=self._stop_event,
+                )
+                if stable_signature is None:
+                    if self._stop_event.is_set():
+                        return False
+                    raise SaveSourceChangedError("save files did not settle before the backup deadline")
+                if self._stop_event.is_set():
+                    return False
+                result = create_backup(
+                    self.game,
+                    note,
+                    expected_source_signature=stable_signature,
+                )
+                if not result:
+                    return False
+                if not self._stop_event.is_set() and callable(self.on_backup_created):
+                    try:
+                        self.on_backup_created(self.game)
+                    except Exception:
+                        pass
+                return True
+            except OSError as exc:
+                last_error = exc
+                if attempt + 1 >= max(1, int(self._backup_attempts)):
+                    break
+                delay = (
+                    self._retry_backoff[min(attempt, len(self._retry_backoff) - 1)]
+                    if self._retry_backoff else 0.0
+                )
+                logger.debug(
+                    "文件监控备份暂时失败，%.1f 秒后重试（%s/%s）：%s",
+                    delay, attempt + 1, self._backup_attempts, exc,
+                )
+                if self._stop_event.wait(max(0.0, float(delay))):
+                    return False
+        if last_error is not None:
+            self._retryable_failure = not self._stop_event.is_set()
+            logger.warning(
+                "文件监控备份在 %s 次尝试后失败 %s: %s",
+                self._backup_attempts,
+                self.game.get("name", ""),
+                last_error,
+            )
+        return False
+
+    def _try_backup(self, timer_generation: Optional[int] = None):
+        with self._timer_lock:
+            if timer_generation is not None and timer_generation != self._timer_generation:
+                return
+            self._timer = None
+            if self._closed or not self._pending or self._backup_running:
+                return
+            now = self._clock()
+            delay = self._next_eligible_delay_locked(now)
+            if delay > 0:
+                self._arm_timer_locked(delay)
+                return
+            self._pending = False
+            self._backup_running = True
+
+        success = False
+        try:
+            success = self._perform_backup_with_retry()
+        except Exception:
+            self._retryable_failure = False
+            logger.exception("文件监控备份发生非预期错误: %s", self.game.get("name", ""))
+        finally:
+            with self._timer_lock:
+                self._backup_running = False
+                now = self._clock()
+                if success:
+                    self._last_backup = now
+                retry_failed_backup = bool(
+                    not success
+                    and self._retryable_failure
+                    and not self._closed
+                    and not self._stop_event.is_set()
+                    and get_game_save_specs(self.game, existing_only=True)
+                )
+                if retry_failed_backup:
+                    self._pending = True
+                    delay = max(
+                        self._next_eligible_delay_locked(now),
+                        max(0.0, float(self._failure_retry_delay)),
+                    )
+                    self._arm_timer_locked(delay)
+                elif self._pending and not self._closed:
+                    self._arm_timer_locked(self._next_eligible_delay_locked(now))
+
+    def close(self):
+        self._stop_event.set()
+        with self._timer_lock:
+            self._closed = True
+            self._pending = False
+            self._timer_generation += 1
             if self._timer:
                 try:
                     self._timer.cancel()
                 except Exception:
                     pass
-            self._timer = threading.Timer(self._quiet_delay, self._try_backup)
-            self._timer.daemon = True
-            self._timer.start()
-
-    def _try_backup(self):
-        with self._timer_lock:
-            self._timer = None
-        now = datetime.datetime.now().timestamp()
-        if now - self._last_backup < self.cooldown:
-            return
-        self._last_backup = now
-        result = create_backup(self.game, localize_backup_note("文件变动自动备份", cfg_language(self.cfg)))
-        if result and callable(self.on_backup_created):
-            try:
-                self.on_backup_created(self.game)
-            except Exception:
-                pass
+                self._timer = None
 
 
 # ══════════════════════════════════════════════
@@ -10308,33 +11033,103 @@ class SteamSaveManager(ctk.CTk):
             return _normalize_unique_save_specs(selected_candidate.get("save_specs", []))
         return []
 
-    def _add_from_scan(self, appid, name, save_path):
-        games = self.cfg.setdefault("games", [])
-        save_paths = self._collect_scan_add_paths(appid, save_path)
-        save_specs = self._collect_scan_add_specs(appid, save_path)
-        if any(game_matches_save_target(g, appid, save_specs=save_specs, save_paths=save_paths) for g in games):
-            self._show_info(self.bi("提示", "Notice"), self.bi(f"「{name}」已添加过", f"{name} has already been added"))
-            return
-        game = {"appid": appid, "name": name, "favorite": False}
-        if save_specs:
-            set_game_save_specs(game, save_specs)
-        else:
-            set_game_save_paths(game, save_paths if save_paths else [save_path])
-        ensure_game_storage_identity(game)
+    def _get_scan_selected_candidate(self, appid: str, selected_path: str) -> dict:
+        selected_norm = os.path.normpath(selected_path) if selected_path else ""
         result = next((r for r in self._scan_results if r.get("appid") == appid), None)
+        if not result:
+            return {
+                "path": selected_norm,
+                "source": "manual",
+                "confidence": "high",
+                "materialized": bool(selected_norm and os.path.exists(selected_norm)),
+            }
+        selected = next(
+            (
+                candidate for candidate in result.get("save_candidates", [])
+                if os.path.normpath(candidate.get("path", "")) == selected_norm
+            ),
+            {
+                "path": selected_norm,
+                "source": "manual",
+                "confidence": "high",
+                "materialized": bool(selected_norm and os.path.exists(selected_norm)),
+            },
+        )
+        if selected.get("source") not in {"steamdb", "appinfo"}:
+            return dict(selected)
+        related = [
+            candidate for candidate in result.get("save_candidates", [])
+            if candidate.get("source") == selected.get("source")
+        ]
+        effective = dict(selected)
+        effective["confidence"] = min(
+            (
+                str(candidate.get("confidence", "low") or "low")
+                for candidate in related
+            ),
+            key=lambda value: _SCAN_CONFIDENCE_RANK.get(value, 0),
+            default="low",
+        )
+        effective["materialized"] = bool(
+            related and all(candidate.get("materialized", True) for candidate in related)
+        )
+        return effective
+
+    def _build_scanned_game(self, appid: str, name: str, selected_path: str,
+                            *, user_confirmed: bool) -> tuple[Optional[dict], str]:
+        result = next((r for r in self._scan_results if r.get("appid") == appid), None)
+        save_paths = self._collect_scan_add_paths(appid, selected_path)
+        save_specs = self._collect_scan_add_specs(appid, selected_path)
+        safe_specs, safety_issue = validate_scan_save_specs(
+            appid=appid,
+            selected_path=selected_path,
+            save_specs=save_specs,
+            save_paths=save_paths if save_paths else [selected_path],
+            install_dir=str((result or {}).get("install_dir", "") or ""),
+            steam_path=str(self.cfg.get("steam_path", "") or ""),
+            library_path=str((result or {}).get("library_path", "") or ""),
+            cfg=self.cfg,
+        )
+        if safety_issue:
+            return None, safety_issue
+
+        game = {"appid": appid, "name": name, "favorite": False}
+        set_game_save_specs(game, safe_specs)
+        candidate = self._get_scan_selected_candidate(appid, selected_path)
+        apply_scanned_game_metadata(game, candidate, user_confirmed)
         if result and result.get("library_path"):
             game["library_path"] = result.get("library_path", "")
-        games.append(game)
-        remember_recognition_path(self.cfg, appid, name, game.get("save_path", ""))
+        ensure_game_storage_identity(game)
+        return game, ""
+
+    def _add_from_scan(self, appid, name, save_path):
+        games = self.cfg.setdefault("games", [])
+        game, safety_issue = self._build_scanned_game(
+            appid, name, save_path, user_confirmed=True
+        )
+        if game is None:
+            self._show_warning(
+                self.bi("无法添加", "Cannot Add"),
+                self.bi(
+                    f"该存档候选未通过安全检查：{safety_issue}",
+                    f"The save candidate did not pass safety validation: {safety_issue}",
+                ),
+            )
+            return
+        action, stored_game = merge_scanned_game_record(games, game, self.cfg)
+        if action == "unchanged":
+            self._show_info(self.bi("提示", "Notice"), self.bi(f"「{name}」已添加过", f"{name} has already been added"))
+            return
+        remember_recognition_path(self.cfg, appid, name, stored_game.get("save_path", ""))
         save_config(self.cfg)
         self._refresh_games_list()
         self._render_scan_results()
-        if len(game.get("save_paths", [])) > 1:
+        if len(stored_game.get("save_paths", [])) > 1:
             self._show_info(
                 self.bi("成功", "Success"),
                 self.bi(
-                    f"已添加「{name}」，共 {len(game['save_paths'])} 个存档目录",
-                    f"Added {name} with {len(game['save_paths'])} save folders",
+                    f"已更新「{name}」，共 {len(stored_game['save_paths'])} 个存档目录",
+                    f"Updated {name} with {len(stored_game['save_paths'])} save folders",
                 ),
             )
         else:
@@ -10351,20 +11146,17 @@ class SteamSaveManager(ctk.CTk):
                 continue
             selected_value = self._scan_choice_vars.get(appid).get() if appid in self._scan_choice_vars else result["save_paths"][0]
             selected = self._resolve_scan_selected_path(appid, selected_value)
-            save_paths = self._collect_scan_add_paths(appid, selected)
-            save_specs = self._collect_scan_add_specs(appid, selected)
-            if any(game_matches_save_target(g, appid, save_specs=save_specs, save_paths=save_paths) for g in games):
+            game, _safety_issue = self._build_scanned_game(
+                appid, result["name"], selected, user_confirmed=False
+            )
+            if game is None:
                 continue
-            game = {"appid": appid, "name": result["name"], "favorite": False}
-            if save_specs:
-                set_game_save_specs(game, save_specs)
-            else:
-                set_game_save_paths(game, save_paths if save_paths else [selected])
-            ensure_game_storage_identity(game)
-            if result.get("library_path"):
-                game["library_path"] = result.get("library_path", "")
-            games.append(game)
-            remember_recognition_path(self.cfg, appid, result["name"], game.get("save_path", ""))
+            action, stored_game = merge_scanned_game_record(games, game, self.cfg)
+            if action == "unchanged":
+                continue
+            remember_recognition_path(
+                self.cfg, appid, result["name"], stored_game.get("save_path", "")
+            )
             added += 1
         if not added:
             self._show_info(
@@ -13802,22 +14594,30 @@ class SteamSaveManager(ctk.CTk):
         for g in self.cfg.get("games", []):
             if not g.get("auto_backup", True):
                 continue
-            for save_path in get_game_save_paths(g, existing_only=True):
-                handler = SaveChangeHandler(
-                    g, cd,
-                    cfg=self.cfg,
-                    on_backup_created=lambda game_ref, self=self: self.after(
-                        0, lambda gr=dict(game_ref): self._on_backups_changed(gr)
-                    ),
-                )
+            save_paths = get_game_save_paths(g, existing_only=True)
+            if not save_paths:
+                continue
+            handler = SaveChangeHandler(
+                g, cd,
+                cfg=self.cfg,
+                on_backup_created=lambda game_ref, self=self: self.after(
+                    0, lambda gr=dict(game_ref): self._on_backups_changed(gr)
+                ),
+            )
+            for save_path in save_paths:
                 observer.schedule(handler, save_path, recursive=True)
-                self._watch_handlers.append(handler)
                 handler_count += 1
+            self._watch_handlers.append(handler)
         if handler_count:
             observer.start()
             self._watchers.append(observer)
 
     def _stop_watchers(self):
+        for handler in self._watch_handlers:
+            try:
+                handler.close()
+            except Exception:
+                pass
         for obs in self._watchers:
             try:
                 obs.stop()
