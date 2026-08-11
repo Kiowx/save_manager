@@ -527,6 +527,7 @@ def localize_backup_note(note: str, lang: str = "") -> str:
     system_note_pairs = [
         ("定时自动备份", "Scheduled Backup"),
         ("文件变动自动备份", "File change auto backup"),
+        ("游戏退出后自动备份", "Auto backup after game exit"),
         ("同步前自动备份", "Auto backup before sync"),
         ("自动同步成功", "Auto sync completed"),
         ("同步成功", "Sync completed"),
@@ -2754,6 +2755,24 @@ def is_game_sync_enabled(game: Optional[dict]) -> bool:
     return bool(game.get("sync_enabled", True))
 
 
+def is_game_scheduled_backup_enabled(game: Optional[dict]) -> bool:
+    if not isinstance(game, dict):
+        return False
+    return bool(game.get("auto_backup", True))
+
+
+def is_game_watch_backup_enabled(game: Optional[dict]) -> bool:
+    if not isinstance(game, dict):
+        return False
+    return bool(game.get("watch_backup", game.get("auto_backup", True)))
+
+
+def is_game_exit_backup_enabled(game: Optional[dict]) -> bool:
+    if not isinstance(game, dict):
+        return False
+    return bool(game.get("backup_on_exit", False))
+
+
 def is_game_favorite(game: Optional[dict]) -> bool:
     if not isinstance(game, dict):
         return False
@@ -3060,6 +3079,8 @@ def apply_scanned_game_metadata(game: dict, candidate: Optional[dict],
     game["scan_confidence"] = str(candidate.get("confidence", "low") or "low")
     game["scan_confirmed"] = bool(user_confirmed)
     game["auto_backup"] = automation_enabled
+    game["watch_backup"] = automation_enabled
+    game["backup_on_exit"] = False
     game["sync_enabled"] = automation_enabled
 
 
@@ -3138,7 +3159,7 @@ def merge_scanned_game_record(games: list[dict], incoming: dict,
     if existing.get("scan_confidence") != confidence:
         existing["scan_confidence"] = confidence
         changed = True
-    for key in ("auto_backup", "sync_enabled"):
+    for key in ("auto_backup", "watch_backup", "backup_on_exit", "sync_enabled"):
         combined = bool(existing.get(key, False) and incoming.get(key, False))
         if existing.get(key) != combined:
             existing[key] = combined
@@ -4817,6 +4838,15 @@ def load_config() -> dict:
             old_specs = list(game.get("save_specs", [])) if isinstance(game.get("save_specs", []), list) else []
             old_monitor = list(game.get("monitor_processes", [])) if isinstance(game.get("monitor_processes", []), list) else game.get("monitor_processes", "")
             old_storage_specs = _normalize_unique_save_specs(old_specs, for_storage=True)
+            if "auto_backup" not in game:
+                game["auto_backup"] = True
+                changed = True
+            if "watch_backup" not in game:
+                game["watch_backup"] = bool(game.get("auto_backup", True))
+                changed = True
+            if "backup_on_exit" not in game:
+                game["backup_on_exit"] = False
+                changed = True
             if "sync_enabled" not in game:
                 game["sync_enabled"] = True
                 changed = True
@@ -6705,6 +6735,9 @@ def webdav_discover_remote_games(cfg: Optional[dict], local_sync_root: str) -> l
         game = {
             "name": game_name,
             "appid": appid,
+            "auto_backup": True,
+            "watch_backup": True,
+            "backup_on_exit": False,
             "sync_enabled": True,
             "favorite": False,
         }
@@ -8284,15 +8317,19 @@ class GameProcessMonitor:
     4. 无 AppID 游戏的保守进程名关键词匹配（兜底）
     """
 
-    def __init__(self, cfg: dict, poll_interval: int = 10, *, on_backups_changed=None):
+    def __init__(self, cfg: dict, poll_interval: int = 10, *,
+                 on_backups_changed=None, on_game_stopped=None):
         self.cfg = cfg
         self.poll_interval = poll_interval  # 秒
         self._stop_event = threading.Event()
         self._running_games: set[str] = set()  # 当前正在运行的 appid 集合
+        self._running_games_lock = threading.Lock()
+        self._state_ready = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self.sync_log: list[str] = []  # 同步活动日志（最近50条）
         self._upload_guards: dict[str, dict] = {}
         self._on_backups_changed_cb = on_backups_changed
+        self._on_game_stopped_cb = on_game_stopped
         self._fuzzy_scan_cache: tuple[float, set[str]] = (0.0, set())
 
     def start(self):
@@ -8309,8 +8346,28 @@ class GameProcessMonitor:
         _join_thread(thread, timeout=2.0)
         if self._thread is thread and (thread is None or not thread.is_alive()):
             self._thread = None
-        self._running_games.clear()
+        with self._running_games_lock:
+            self._running_games.clear()
+        self._state_ready.clear()
         self._upload_guards.clear()
+
+    def add_activity(self, zh: str, en: str):
+        timestamp = datetime.datetime.now().strftime("%H:%M:%S")
+        message = bilingual_cfg(self.cfg, zh, en)
+        self.sync_log.append(f"[{timestamp}] {message}")
+        self.sync_log = self.sync_log[-50:]
+
+    def is_game_running(self, game: Optional[dict]) -> bool:
+        runtime_key = get_game_runtime_key(game)
+        if not runtime_key:
+            return False
+        if not self._state_ready.is_set():
+            try:
+                return runtime_key in self._find_running_games()
+            except Exception:
+                return False
+        with self._running_games_lock:
+            return runtime_key in self._running_games
 
     def _build_sync_snapshots(self, game: dict, sync_folder: str) -> tuple[dict, dict, Optional[dict]]:
         save_specs = get_game_save_specs(game, existing_only=False)
@@ -8413,8 +8470,6 @@ class GameProcessMonitor:
         tracked = []
         for game in self.cfg.get("games", []):
             if not isinstance(game, dict):
-                continue
-            if not is_game_sync_enabled(game):
                 continue
             key = get_game_runtime_key(game)
             if not key:
@@ -8801,18 +8856,29 @@ class GameProcessMonitor:
         return "\n".join(lines)
 
     def _monitor_loop(self):
+        all_game_by_runtime_key = {
+            get_game_runtime_key(g): g
+            for g in self.cfg.get("games", [])
+            if isinstance(g, dict) and get_game_runtime_key(g)
+        }
         game_by_runtime_key = {
             get_game_runtime_key(g): g
             for g in self.cfg.get("games", [])
             if isinstance(g, dict) and is_game_sync_enabled(g) and get_game_runtime_key(g)
         }
         sync_folder = get_effective_sync_root(self.cfg.get("sync_folder", ""), self.cfg, ensure=True)
+        smart_sync_active = bool(
+            self.cfg.get("sync_enabled") and self.cfg.get("sync_mode") == "smart"
+        )
         def _log(msg: str):
             _ts_log = datetime.datetime.now().strftime("%H:%M:%S")
             self.sync_log.append(f"[{_ts_log}] {msg}")
             self.sync_log = self.sync_log[-50:]
 
-        retry_results = run_sync_retries(self.cfg, self.cfg.get("sync_folder", ""), log_cb=_log)
+        retry_results = (
+            run_sync_retries(self.cfg, self.cfg.get("sync_folder", ""), log_cb=_log)
+            if smart_sync_active and sync_folder else []
+        )
         if retry_results:
             cb = self._on_backups_changed_cb
             if cb:
@@ -8822,24 +8888,28 @@ class GameProcessMonitor:
                     pass
 
         # 初始扫描，记录已在运行的游戏并立即触发一次下载同步
-        self._running_games = self._find_running_games()
+        initial_running = self._find_running_games()
+        with self._running_games_lock:
+            self._running_games = set(initial_running)
+        self._state_ready.set()
         _ts = datetime.datetime.now().strftime("%H:%M:%S")
-        self.sync_log.append(f"[{_ts}] " + bilingual_cfg(
-            self.cfg,
-            f"📂 同步后端: {sync_folder or '未设置'}",
-            f"📂 Sync backend: {sync_folder or 'Not set'}",
-        ))
-        if self._running_games:
-            _names = [game_by_runtime_key.get(a, {}).get("name", a) for a in self._running_games]
+        if smart_sync_active:
+            self.sync_log.append(f"[{_ts}] " + bilingual_cfg(
+                self.cfg,
+                f"📂 同步后端: {sync_folder or '未设置'}",
+                f"📂 Sync backend: {sync_folder or 'Not set'}",
+            ))
+        if initial_running:
+            _names = [all_game_by_runtime_key.get(a, {}).get("name", a) for a in initial_running]
             self.sync_log.append(f"[{_ts}] " + bilingual_cfg(
                 self.cfg,
                 f"🟢 监控启动，已在运行: {', '.join(_names)}",
                 f"🟢 Monitor started, already running: {', '.join(_names)}",
             ))
             # 对已在运行的游戏也触发一次下载（确保云端存档已拉取到本地）
-            for aid in self._running_games:
+            for aid in initial_running:
                 g = game_by_runtime_key.get(aid)
-                if g and sync_folder:
+                if smart_sync_active and g and sync_folder:
                     try:
                         guarded = self._arm_upload_guard_after_launch(g, sync_folder)
                         r = sync_game_save(g, sync_folder, "download",
@@ -8898,9 +8968,13 @@ class GameProcessMonitor:
 
             # 重新加载配置（可能有新游戏添加）
             sync_folder = get_effective_sync_root(self.cfg.get("sync_folder", ""), self.cfg, ensure=True)
-            if not sync_folder:
-                continue
-            retry_results = run_sync_retries(self.cfg, self.cfg.get("sync_folder", ""), log_cb=_log)
+            smart_sync_active = bool(
+                self.cfg.get("sync_enabled") and self.cfg.get("sync_mode") == "smart"
+            )
+            retry_results = (
+                run_sync_retries(self.cfg, self.cfg.get("sync_folder", ""), log_cb=_log)
+                if smart_sync_active and sync_folder else []
+            )
             if retry_results:
                 _cb = self._on_backups_changed_cb
                 if _cb:
@@ -8913,16 +8987,23 @@ class GameProcessMonitor:
                 for g in self.cfg.get("games", [])
                 if isinstance(g, dict) and is_game_sync_enabled(g) and get_game_runtime_key(g)
             }
+            all_game_by_runtime_key = {
+                get_game_runtime_key(g): g
+                for g in self.cfg.get("games", [])
+                if isinstance(g, dict) and get_game_runtime_key(g)
+            }
 
             current = self._find_running_games()
-            prev_ids = self._running_games
+            with self._running_games_lock:
+                prev_ids = set(self._running_games)
+                self._running_games = set(current)
             curr_ids = current
 
             # 新启动的游戏 → 下载云端存档
             for aid in curr_ids - prev_ids:
                 g = game_by_runtime_key.get(aid)
                 _ts = datetime.datetime.now().strftime("%H:%M:%S")
-                if g and sync_folder:
+                if smart_sync_active and g and sync_folder:
                     try:
                         r = sync_game_save(g, sync_folder, "download",
                                            auto=True, cfg=self.cfg)
@@ -8956,7 +9037,7 @@ class GameProcessMonitor:
                             f"❌ {g['name']} 下载失败: {e}",
                             f"❌ Download failed for {g['name']}: {e}",
                         ))
-                elif g:
+                elif smart_sync_active and g:
                     self.sync_log.append(f"[{_ts}] " + bilingual_cfg(
                         self.cfg,
                         f"⚠ {g['name']} 启动，但同步目录未设置",
@@ -8966,9 +9047,16 @@ class GameProcessMonitor:
 
             # 关闭的游戏 → 上传本地存档
             for aid in prev_ids - curr_ids:
+                runtime_game = all_game_by_runtime_key.get(aid)
+                callback = self._on_game_stopped_cb
+                if runtime_game and callable(callback):
+                    try:
+                        callback(dict(runtime_game))
+                    except Exception:
+                        logger.exception("处理游戏退出后的自动备份失败: %s", runtime_game.get("name", ""))
                 g = game_by_runtime_key.get(aid)
                 _ts = datetime.datetime.now().strftime("%H:%M:%S")
-                if g and sync_folder:
+                if smart_sync_active and g and sync_folder:
                     try:
                         guard = self._consume_upload_guard(g)
                         if guard:
@@ -9034,7 +9122,7 @@ class GameProcessMonitor:
                             f"❌ {g['name']} 上传失败: {e}",
                             f"❌ Upload failed for {g['name']}: {e}",
                         ))
-                elif g:
+                elif smart_sync_active and g:
                     self.sync_log.append(f"[{_ts}] " + bilingual_cfg(
                         self.cfg,
                         f"⚠ {g['name']} 关闭，但同步目录未设置",
@@ -9042,20 +9130,20 @@ class GameProcessMonitor:
                     ))
                 self.sync_log = self.sync_log[-50:]
 
-            self._running_games = current
-
-
 # ══════════════════════════════════════════════
 #  文件监控（watchdog）
 # ══════════════════════════════════════════════
 
 class SaveChangeHandler(FileSystemEventHandler):
-    def __init__(self, game: dict, cooldown: int = 60, *, cfg: Optional[dict] = None, on_backup_created=None):
+    def __init__(self, game: dict, cooldown: int = 60, *, cfg: Optional[dict] = None,
+                 on_backup_created=None, is_game_running=None, on_status=None):
         super().__init__()
         self.game = game
         self.cfg = cfg
         self.cooldown = cooldown
         self.on_backup_created = on_backup_created
+        self._is_game_running_cb = is_game_running
+        self._on_status_cb = on_status
         self._last_backup = 0
         self._quiet_delay = 2.5
         self._timer = None
@@ -9063,7 +9151,10 @@ class SaveChangeHandler(FileSystemEventHandler):
         self._timer_lock = threading.Lock()
         self._specs = get_game_save_specs(game, existing_only=False)
         self._pending = False
+        self._pending_note = "文件变动自动备份"
         self._backup_running = False
+        self._deferred_for_running = False
+        self._bypass_cooldown = False
         self._closed = False
         self._last_event_at = 0.0
         self._stop_event = threading.Event()
@@ -9073,6 +9164,7 @@ class SaveChangeHandler(FileSystemEventHandler):
         self._backup_attempts = 3
         self._retry_backoff = (1.0, 2.0)
         self._failure_retry_delay = 30.0
+        self._running_retry_delay = 5.0
         self._retryable_failure = False
         self._clock = time.monotonic
         self._timer_factory = threading.Timer
@@ -9101,18 +9193,65 @@ class SaveChangeHandler(FileSystemEventHandler):
             return
         if self._specs and not any(_save_specs_match_path(self._specs, path) for path in paths):
             return
-        self._schedule_backup()
+        self._schedule_backup("文件变动自动备份")
 
-    def _schedule_backup(self):
+    def _emit_status(self, zh: str, en: str):
+        callback = self._on_status_cb
+        if not callable(callback):
+            return
+        try:
+            callback(zh, en)
+        except Exception:
+            pass
+
+    def _is_game_running(self) -> bool:
+        callback = self._is_game_running_cb
+        if not callable(callback):
+            return False
+        try:
+            return bool(callback(self.game))
+        except Exception:
+            logger.exception("检查游戏运行状态失败: %s", self.game.get("name", ""))
+            return False
+
+    def _schedule_backup(self, note: str = "文件变动自动备份"):
         now = self._clock()
         with self._timer_lock:
             if self._closed:
                 return
+            first_pending_event = not self._pending
             self._pending = True
+            self._pending_note = note or self._pending_note
             self._last_event_at = now
+            if first_pending_event and note == "文件变动自动备份":
+                self._emit_status(
+                    f"📝 检测到 {self.game.get('name', '')} 存档变化，已加入自动备份队列",
+                    f"📝 Save changes detected for {self.game.get('name', '')}; automatic backup queued",
+                )
             if self._backup_running:
                 return
             self._arm_timer_locked(self._quiet_delay)
+
+    def request_scheduled_backup(self):
+        self._schedule_backup("定时自动备份")
+
+    def on_game_stopped(self, *, force: bool = False) -> bool:
+        now = self._clock()
+        with self._timer_lock:
+            if self._closed or (not force and not self._pending):
+                return False
+            self._pending = True
+            self._pending_note = "游戏退出后自动备份"
+            self._deferred_for_running = False
+            self._bypass_cooldown = True
+            self._last_event_at = now
+            if not self._backup_running:
+                self._arm_timer_locked(self._quiet_delay)
+        self._emit_status(
+            f"⏳ {self.game.get('name', '')} 已退出，正在等待存档稳定后备份",
+            f"⏳ {self.game.get('name', '')} exited; waiting for the save to settle before backup",
+        )
+        return True
 
     def _arm_timer_locked(self, delay: float):
         if self._closed:
@@ -9133,13 +9272,20 @@ class SaveChangeHandler(FileSystemEventHandler):
 
     def _next_eligible_delay_locked(self, now: float) -> float:
         quiet_until = self._last_event_at + self._quiet_delay
-        cooldown_until = self._last_backup + self.cooldown if self._last_backup else now
+        cooldown_until = (
+            now if self._bypass_cooldown
+            else self._last_backup + self.cooldown if self._last_backup else now
+        )
         return max(0.0, quiet_until - now, cooldown_until - now)
 
     def _perform_backup_with_retry(self) -> bool:
-        note = localize_backup_note("文件变动自动备份", cfg_language(self.cfg))
+        note = localize_backup_note(self._pending_note, cfg_language(self.cfg))
         last_error = None
         self._retryable_failure = False
+        self._emit_status(
+            f"⏳ 正在确认 {self.game.get('name', '')} 存档文件已稳定",
+            f"⏳ Checking that save files for {self.game.get('name', '')} have settled",
+        )
         for attempt in range(max(1, int(self._backup_attempts))):
             if self._stop_event.is_set():
                 return False
@@ -9185,6 +9331,10 @@ class SaveChangeHandler(FileSystemEventHandler):
                     "文件监控备份暂时失败，%.1f 秒后重试（%s/%s）：%s",
                     delay, attempt + 1, self._backup_attempts, exc,
                 )
+                self._emit_status(
+                    f"⏳ {self.game.get('name', '')} 备份读取失败，{delay:.1f} 秒后重试",
+                    f"⏳ Backup read failed for {self.game.get('name', '')}; retrying in {delay:.1f}s",
+                )
                 if self._stop_event.wait(max(0.0, float(delay))):
                     return False
         if last_error is not None:
@@ -9195,14 +9345,29 @@ class SaveChangeHandler(FileSystemEventHandler):
                 self.game.get("name", ""),
                 last_error,
             )
+            self._emit_status(
+                f"❌ {self.game.get('name', '')} 自动备份失败: {last_error}",
+                f"❌ Automatic backup failed for {self.game.get('name', '')}: {last_error}",
+            )
         return False
 
     def _try_backup(self, timer_generation: Optional[int] = None):
+        deferred_now = False
         with self._timer_lock:
             if timer_generation is not None and timer_generation != self._timer_generation:
                 return
             self._timer = None
             if self._closed or not self._pending or self._backup_running:
+                return
+            if self._is_game_running():
+                deferred_now = not self._deferred_for_running
+                self._deferred_for_running = True
+                self._arm_timer_locked(self._running_retry_delay)
+                if deferred_now:
+                    self._emit_status(
+                        f"⏸ {self.game.get('name', '')} 正在运行，自动备份已推迟到游戏退出后",
+                        f"⏸ {self.game.get('name', '')} is running; automatic backup was deferred until exit",
+                    )
                 return
             now = self._clock()
             delay = self._next_eligible_delay_locked(now)
@@ -9211,6 +9376,7 @@ class SaveChangeHandler(FileSystemEventHandler):
                 return
             self._pending = False
             self._backup_running = True
+            self._bypass_cooldown = False
 
         success = False
         try:
@@ -9224,6 +9390,11 @@ class SaveChangeHandler(FileSystemEventHandler):
                 now = self._clock()
                 if success:
                     self._last_backup = now
+                    self._deferred_for_running = False
+                    self._emit_status(
+                        f"✅ {self.game.get('name', '')} 自动备份完成",
+                        f"✅ Automatic backup completed for {self.game.get('name', '')}",
+                    )
                 retry_failed_backup = bool(
                     not success
                     and self._retryable_failure
@@ -9320,6 +9491,8 @@ class SteamSaveManager(ctk.CTk):
         self._sync_thread: Optional[threading.Thread] = None
         self._watchers: list[Any] = []
         self._watch_handlers: list[SaveChangeHandler] = []
+        self._watch_handlers_by_game: dict[str, SaveChangeHandler] = {}
+        self._game_monitor: Optional[GameProcessMonitor] = None
         self._detail_refresh_job = None  # 详情页自动刷新定时器
         self._sync_ui_queue: queue.Queue = queue.Queue()
         self._open_conflict_dialogs: set[str] = set()
@@ -9404,14 +9577,12 @@ class SteamSaveManager(ctk.CTk):
 
         if self.cfg.get("auto_backup_enabled"):
             self._start_auto_backup()
-        if self.cfg.get("watch_enabled"):
-            self._start_watchers()
         if self.cfg.get("sync_enabled"):
             self._start_sync()
 
-        # 智能云存档进程监控
-        self._game_monitor: Optional[GameProcessMonitor] = None
         self._ensure_game_monitor()
+        if self._backup_handlers_should_run():
+            self._start_watchers()
         self.after(1200, self._drain_sync_ui_queue)
         self.after(1800, self._check_for_updates_silent)
         if STARTUP_LAUNCH:
@@ -9971,9 +10142,11 @@ class SteamSaveManager(ctk.CTk):
         return dialog.get_input() or ""
 
     def _ensure_game_monitor(self):
-        """确保在同步启用且为智能模式时，游戏进程监控正在运行"""
-        should_run = (self.cfg.get("sync_enabled")
-                      and self.cfg.get("sync_mode") == "smart")
+        """确保智能同步或安全自动备份所需的进程监控正在运行。"""
+        should_run = bool(
+            (self.cfg.get("sync_enabled") and self.cfg.get("sync_mode") == "smart")
+            or self._backup_handlers_should_run()
+        )
         if should_run:
             if (self._game_monitor is None
                     or self._game_monitor._thread is None
@@ -11737,7 +11910,15 @@ class SteamSaveManager(ctk.CTk):
                 if not n or not save_specs:
                     self._show_warning(self.bi("提示", "Notice"), self.bi("请填写名称并至少添加一个存档文件夹或文件", "Please enter a name and add at least one save folder or file")); return
                 appid = ae.get().strip()
-                game = {"name": n, "appid": appid, "sync_enabled": True, "favorite": False}
+                game = {
+                    "name": n,
+                    "appid": appid,
+                    "auto_backup": True,
+                    "watch_backup": True,
+                    "backup_on_exit": False,
+                    "sync_enabled": True,
+                    "favorite": False,
+                }
                 set_game_save_specs(game, save_specs)
                 game["manual_save_specs"] = True
                 set_game_monitor_processes(game, pe.get().strip())
@@ -11980,12 +12161,25 @@ class SteamSaveManager(ctk.CTk):
             row=0, column=0, padx=(16, 8), pady=14, sticky="w")
         self._detail_auto_var = ctk.StringVar(value="on")
         self._detail_auto_switch = ctk.CTkSwitch(
-            settings_card, text=self.bi("自动备份此游戏（定时备份 / 文件监控时包含此游戏）",
-                                        "Back up this game automatically (included in scheduled backup and file watch)"),
+            settings_card, text=self.bi("定时自动备份此游戏", "Scheduled backup for this game"),
             variable=self._detail_auto_var,
             onvalue="on", offvalue="off", font=font(12),
             command=self._toggle_game_auto_backup)
         self._detail_auto_switch.grid(row=0, column=1, padx=(0, 16), pady=14, sticky="w")
+        self._detail_watch_var = ctk.StringVar(value="on")
+        self._detail_watch_switch = ctk.CTkSwitch(
+            settings_card, text=self.bi("文件变动时自动备份此游戏", "File-change backup for this game"),
+            variable=self._detail_watch_var,
+            onvalue="on", offvalue="off", font=font(12),
+            command=self._toggle_game_watch_backup)
+        self._detail_watch_switch.grid(row=1, column=1, padx=(0, 16), pady=(0, 14), sticky="w")
+        self._detail_exit_backup_var = ctk.StringVar(value="off")
+        self._detail_exit_backup_switch = ctk.CTkSwitch(
+            settings_card, text=self.bi("游戏退出后自动备份", "Back up automatically after game exit"),
+            variable=self._detail_exit_backup_var,
+            onvalue="on", offvalue="off", font=font(12),
+            command=self._toggle_game_exit_backup)
+        self._detail_exit_backup_switch.grid(row=2, column=1, padx=(0, 16), pady=(0, 14), sticky="w")
         self._detail_sync_var = ctk.StringVar(value="on")
         self._detail_sync_switch = ctk.CTkSwitch(
             settings_card, text=self.bi("存档自动同步此游戏（智能云存档 / 同步全部时包含此游戏）",
@@ -11993,7 +12187,7 @@ class SteamSaveManager(ctk.CTk):
             variable=self._detail_sync_var,
             onvalue="on", offvalue="off", font=font(12),
             command=self._toggle_game_sync_enabled)
-        self._detail_sync_switch.grid(row=1, column=1, padx=(0, 16), pady=(0, 14), sticky="w")
+        self._detail_sync_switch.grid(row=3, column=1, padx=(0, 16), pady=(0, 14), sticky="w")
         self._detail_favorite_var = ctk.StringVar(value="off")
         self._detail_favorite_switch = ctk.CTkSwitch(
             settings_card, text=self.bi("收藏此游戏（在游戏列表中优先显示）",
@@ -12001,7 +12195,7 @@ class SteamSaveManager(ctk.CTk):
             variable=self._detail_favorite_var,
             onvalue="on", offvalue="off", font=font(12),
             command=self._toggle_game_favorite_from_detail)
-        self._detail_favorite_switch.grid(row=2, column=1, padx=(0, 16), pady=(0, 14), sticky="w")
+        self._detail_favorite_switch.grid(row=4, column=1, padx=(0, 16), pady=(0, 14), sticky="w")
 
         # Row 6: 备份历史按钮卡片
         bk_card = ctk.CTkFrame(frame, fg_color=C_CARD_BG, corner_radius=12)
@@ -12085,8 +12279,10 @@ class SteamSaveManager(ctk.CTk):
                 command=cmd)).grid(row=0, column=i, padx=3, sticky="ew")
 
         # 单独设置：自动备份开关
-        auto_on = g.get("auto_backup", True)
+        auto_on = is_game_scheduled_backup_enabled(g)
         self._detail_auto_var.set("on" if auto_on else "off")
+        self._detail_watch_var.set("on" if is_game_watch_backup_enabled(g) else "off")
+        self._detail_exit_backup_var.set("on" if is_game_exit_backup_enabled(g) else "off")
         self._detail_sync_var.set("on" if is_game_sync_enabled(g) else "off")
         self._detail_favorite_var.set("on" if is_game_favorite(g) else "off")
 
@@ -12095,12 +12291,7 @@ class SteamSaveManager(ctk.CTk):
             text=self.bi(f"{len(backups)} 条记录  ·  {fmt_size(total_size)}",
                          f"{len(backups)} records  ·  {fmt_size(total_size)}") if backups else self.bi("暂无备份", "No backups"))
 
-        # 自动启动同步监控（如果条件满足但未启动）
-        if (self.cfg.get("sync_enabled") and self.cfg.get("sync_mode") == "smart"
-                and (self._game_monitor is None
-                     or self._game_monitor._thread is None
-                     or not self._game_monitor._thread.is_alive())):
-            self._start_game_monitor()
+        self._ensure_game_monitor()
 
         # 进程状态
         self._refresh_proc_status()
@@ -12904,10 +13095,19 @@ class SteamSaveManager(ctk.CTk):
         en = self._detail_auto_var.get() == "on"
         self.cfg["games"][idx]["auto_backup"] = en
         save_config(self.cfg)
-        # 重建文件监控（如果开启了全局监控）
-        if self.cfg.get("watch_enabled"):
-            self._stop_watchers()
-            self._start_watchers()
+        self._restart_watchers_runtime()
+
+    def _toggle_game_watch_backup(self):
+        idx = self._detail_idx
+        self.cfg["games"][idx]["watch_backup"] = self._detail_watch_var.get() == "on"
+        save_config(self.cfg)
+        self._restart_watchers_runtime()
+
+    def _toggle_game_exit_backup(self):
+        idx = self._detail_idx
+        self.cfg["games"][idx]["backup_on_exit"] = self._detail_exit_backup_var.get() == "on"
+        save_config(self.cfg)
+        self._restart_watchers_runtime()
 
     def _toggle_game_sync_enabled(self):
         idx = self._detail_idx
@@ -13975,23 +14175,31 @@ class SteamSaveManager(ctk.CTk):
         else:
             self._stop_auto_backup()
 
+    def _backup_handlers_should_run(self) -> bool:
+        games = [g for g in self.cfg.get("games", []) if isinstance(g, dict)]
+        return any(
+            is_game_exit_backup_enabled(game)
+            or (self.cfg.get("auto_backup_enabled") and is_game_scheduled_backup_enabled(game))
+            or (HAS_WATCHDOG and self.cfg.get("watch_enabled") and is_game_watch_backup_enabled(game))
+            for game in games
+        )
+
     def _restart_watchers_runtime(self):
-        if self.cfg.get("watch_enabled"):
+        if self._backup_handlers_should_run():
             self._stop_watchers()
             self._start_watchers()
         else:
             self._stop_watchers()
+        self._ensure_game_monitor()
 
     def _restart_sync_runtime(self):
         if self.cfg.get("sync_enabled"):
             self._stop_sync()
             self._start_sync()
-            self._stop_game_monitor()
-            if self.cfg.get("sync_mode") == "smart":
-                self._start_game_monitor()
         else:
             self._stop_sync()
-            self._stop_game_monitor()
+        self._stop_game_monitor()
+        self._ensure_game_monitor()
 
     def _on_language_change(self, _value=None):
         new_lang = self._language_code(self._language_var.get())
@@ -14300,6 +14508,7 @@ class SteamSaveManager(ctk.CTk):
         en = self._auto_var.get() == "on"
         self.cfg["auto_backup_enabled"] = en; save_config(self.cfg)
         self._restart_auto_backup_runtime()
+        self._restart_watchers_runtime()
         self._update_status()
 
     def _toggle_watch(self):
@@ -14490,14 +14699,14 @@ class SteamSaveManager(ctk.CTk):
             except Exception:
                 running_game_keys = set()
             for g in self.cfg.get("games", []):
-                if not g.get("auto_backup", True):
+                if not is_game_scheduled_backup_enabled(g):
                     continue
                 runtime_key = get_game_runtime_key(g)
                 if not runtime_key or runtime_key not in running_game_keys:
                     continue
-                result = create_backup(g, self.bi("定时自动备份", "Scheduled Backup"))
-                if result:
-                    self.after(0, lambda game_ref=dict(g): self._on_backups_changed(game_ref))
+                handler = self._watch_handlers_by_game.get(runtime_key)
+                if handler:
+                    handler.request_scheduled_backup()
 
     def _update_status(self):
         if self.cfg.get("auto_backup_enabled"):
@@ -14566,6 +14775,22 @@ class SteamSaveManager(ctk.CTk):
                 pass
 
     # ─── 智能云存档进程监控 ───
+    def _is_game_running_for_backup(self, game: dict) -> bool:
+        monitor = self._game_monitor
+        return bool(monitor and monitor.is_game_running(game))
+
+    def _record_backup_activity(self, zh: str, en: str):
+        monitor = self._game_monitor
+        if monitor:
+            monitor.add_activity(zh, en)
+        logger.info("%s", bilingual_cfg(self.cfg, zh, en))
+
+    def _handle_game_stopped_for_backup(self, game: dict):
+        runtime_key = get_game_runtime_key(game)
+        handler = self._watch_handlers_by_game.get(runtime_key)
+        if handler:
+            handler.on_game_stopped(force=is_game_exit_backup_enabled(game))
+
     def _start_game_monitor(self):
         self._stop_game_monitor()
         if self._game_monitor is not None:
@@ -14573,6 +14798,7 @@ class SteamSaveManager(ctk.CTk):
         self._game_monitor = GameProcessMonitor(
             self.cfg,
             on_backups_changed=lambda *a: self.after(0, lambda: self._on_backups_changed(*a) if a else self._on_backups_changed()),
+            on_game_stopped=self._handle_game_stopped_for_backup,
         )
         self._game_monitor.start()
 
@@ -14586,13 +14812,22 @@ class SteamSaveManager(ctk.CTk):
 
     # ─── 文件监控 ───
     def _start_watchers(self):
-        if not HAS_WATCHDOG: return
         self._stop_watchers()
         cd = self.cfg.get("watch_cooldown", 60)
-        observer = Observer()
+        observer = Observer() if HAS_WATCHDOG and self.cfg.get("watch_enabled", True) else None
+        if not hasattr(self, "_watch_handlers_by_game"):
+            self._watch_handlers_by_game = {}
         handler_count = 0
         for g in self.cfg.get("games", []):
-            if not g.get("auto_backup", True):
+            scheduled_enabled = bool(
+                self.cfg.get("auto_backup_enabled")
+                and is_game_scheduled_backup_enabled(g)
+            )
+            watch_enabled = bool(
+                observer is not None and is_game_watch_backup_enabled(g)
+            )
+            exit_enabled = is_game_exit_backup_enabled(g)
+            if not (scheduled_enabled or watch_enabled or exit_enabled):
                 continue
             save_paths = get_game_save_paths(g, existing_only=True)
             if not save_paths:
@@ -14603,12 +14838,18 @@ class SteamSaveManager(ctk.CTk):
                 on_backup_created=lambda game_ref, self=self: self.after(
                     0, lambda gr=dict(game_ref): self._on_backups_changed(gr)
                 ),
+                is_game_running=getattr(self, "_is_game_running_for_backup", None),
+                on_status=getattr(self, "_record_backup_activity", None),
             )
-            for save_path in save_paths:
-                observer.schedule(handler, save_path, recursive=True)
-                handler_count += 1
+            runtime_key = get_game_runtime_key(g)
+            if runtime_key:
+                self._watch_handlers_by_game[runtime_key] = handler
+            if watch_enabled:
+                for save_path in save_paths:
+                    observer.schedule(handler, save_path, recursive=True)
+                    handler_count += 1
             self._watch_handlers.append(handler)
-        if handler_count:
+        if observer is not None and handler_count:
             observer.start()
             self._watchers.append(observer)
 
@@ -14630,6 +14871,8 @@ class SteamSaveManager(ctk.CTk):
                 pass
         self._watchers.clear()
         self._watch_handlers.clear()
+        if hasattr(self, "_watch_handlers_by_game"):
+            self._watch_handlers_by_game.clear()
 
     # ─── 系统托盘 & 关闭 ───
     def _on_close(self):

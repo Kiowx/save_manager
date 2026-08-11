@@ -15,7 +15,7 @@ A Windows-focused Steam save management tool with save scanning, backup and rest
 - Automatically scans installed Steam games and tries to detect common local save locations
 - Supports manually adding games, editing save paths, and importing external saves
 - Supports manual backup, batch backup, restore, and backup deletion
-- Supports scheduled backup and file-change monitoring powered by `watchdog`
+- Supports scheduled, file-change, and game-exit backups; archives are deferred while a game is running to avoid reading saves that are still being written
 - Supports syncing with local cloud folders such as OneDrive, Dropbox, and Google Drive
 - Supports Smart Cloud Save mode: download on game launch and upload on game exit
 - Supports bidirectional sync baselines, conflict detection, and retry queues
