@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Steam 游戏存档备份管理器 v1.5.7 — 通用版"""
+"""Steam 游戏存档备份管理器 v1.6.0 — 通用版"""
 
 import os
 import sys
@@ -104,8 +104,11 @@ except ImportError as exc:
 # ══════════════════════════════════════════════
 
 APP_NAME = "Steam Save Manager"
-VERSION = "1.5.7"
+VERSION = "1.6.0"
 APP_DIR = Path(os.path.dirname(os.path.abspath(sys.argv[0])))
+RESOURCE_DIR = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+APP_LOGO_PATH = RESOURCE_DIR / "assets" / "app_logo.png"
+APP_ICON_PATH = RESOURCE_DIR / "assets" / "app_logo.ico"
 LEGACY_CONFIG_DIR = Path.home() / ".steam_save_manager"
 STARTUP_AUTOSTART_FLAG = "--startup-launch"
 STARTUP_LAUNCH = STARTUP_AUTOSTART_FLAG in sys.argv
@@ -217,8 +220,8 @@ TRANSLATIONS = {
         "nav_games": "游戏列表",
         "nav_backup": "备份记录",
         "nav_settings": "设置",
-        "status_auto_on": "▶ 定时备份：{minutes}分钟",
-        "status_auto_off": "⏸ 自动备份：关闭",
+        "status_auto_on": "定时备份：{minutes}分钟",
+        "status_auto_off": "自动备份：关闭",
         "home_title": "欢迎使用 Steam 存档管家",
         "home_subtitle": "自动扫描、备份和还原你的游戏存档",
         "stat_games": "已添加",
@@ -229,20 +232,20 @@ TRANSLATIONS = {
         "value_backups": "{count} 个",
         "switch_on": "开启",
         "switch_off": "关闭",
-        "home_backup_all": "🔄  一键备份全部",
-        "home_sync_all": "🔄  立即同步全部",
-        "home_scan": "🔍  扫描并添加游戏",
-        "home_recent": "  📋 最近备份",
+        "home_backup_all": "一键备份全部",
+        "home_sync_all": "立即同步全部",
+        "home_scan": "扫描并添加游戏",
+        "home_recent": "最近备份",
         "home_no_backups": "暂无备份记录，快去扫描游戏吧 →",
-        "scan_title": "🔍 扫描 Steam 游戏库",
+        "scan_title": "扫描 Steam 游戏库",
         "scan_start": "开始扫描",
         "scan_add_all": "全部添加",
         "scan_hint": "点击「开始扫描」自动检测已安装的 Steam 游戏",
-        "scan_missing_steam": "⚠️ 未检测到 Steam 库路径\n请在设置中配置 Steam 安装路径",
-        "backup_title": "💾 备份记录",
+        "scan_missing_steam": "未检测到 Steam 库路径\n请在设置中配置 Steam 安装路径",
+        "backup_title": "备份记录",
         "backup_all_games": "全部游戏",
         "backup_empty": "暂无备份",
-        "settings_title": "🔧 设置",
+        "settings_title": "设置",
         "settings_subtitle": "根据你的系统环境调整语言、同步和备份行为，修改后会立即生效。",
         "section_general": "基础设置",
         "section_general_sub": "语言、主题与 Steam 路径",
@@ -265,7 +268,7 @@ TRANSLATIONS = {
         "interval_minutes": "间隔(分钟)",
         "file_watch": "文件变动监控",
         "cooldown_seconds": "冷却(秒)",
-        "watchdog_missing": "⚠ 未安装 watchdog，pip install watchdog",
+        "watchdog_missing": "未安装 watchdog，pip install watchdog",
         "auto_sync": "存档自动同步",
         "sync_folder": "同步文件夹",
         "sync_folder_placeholder": "选择云盘文件夹 (OneDrive / Dropbox / Google Drive)",
@@ -303,7 +306,7 @@ TRANSLATIONS = {
         "webdav_missing": "WebDAV 组件不可用，请运行 pip install webdavclient3",
         "minimize_tray": "关闭时最小化到托盘",
         "minimize_tray_desc": "关闭窗口时最小化到系统托盘后台运行",
-        "tray_missing": "⚠ 未安装 pystray，pip install pystray",
+        "tray_missing": "未安装 pystray，pip install pystray",
         "autostart": "开机自启",
         "autostart_desc": "开启后登录 Windows 时自动启动",
         "autostart_minimize": "开机自启时最小化",
@@ -340,8 +343,8 @@ TRANSLATIONS = {
         "nav_games": "Games",
         "nav_backup": "Backups",
         "nav_settings": "Settings",
-        "status_auto_on": "▶ Scheduled Backup: {minutes} min",
-        "status_auto_off": "⏸ Scheduled Backup: Off",
+        "status_auto_on": "Scheduled Backup: {minutes} min",
+        "status_auto_off": "Scheduled Backup: Off",
         "home_title": "Welcome to Steam Save Manager",
         "home_subtitle": "Scan, back up, and restore your game saves automatically",
         "stat_games": "Tracked Games",
@@ -352,20 +355,20 @@ TRANSLATIONS = {
         "value_backups": "{count} items",
         "switch_on": "On",
         "switch_off": "Off",
-        "home_backup_all": "🔄  Back Up All",
-        "home_sync_all": "🔄  Sync All Now",
-        "home_scan": "🔍  Scan and Add Games",
-        "home_recent": "  📋 Recent Backups",
+        "home_backup_all": "Back Up All",
+        "home_sync_all": "Sync All Now",
+        "home_scan": "Scan and Add Games",
+        "home_recent": "Recent Backups",
         "home_no_backups": "No backups yet. Try scanning your games →",
-        "scan_title": "🔍 Scan Steam Libraries",
+        "scan_title": "Scan Steam Libraries",
         "scan_start": "Start Scan",
         "scan_add_all": "Add All",
         "scan_hint": "Click “Start Scan” to detect installed Steam games automatically",
-        "scan_missing_steam": "⚠️ No Steam library path was detected.\nPlease configure your Steam install path in Settings.",
-        "backup_title": "💾 Backup History",
+        "scan_missing_steam": "No Steam library path was detected.\nPlease configure your Steam install path in Settings.",
+        "backup_title": "Backup History",
         "backup_all_games": "All Games",
         "backup_empty": "No backups yet",
-        "settings_title": "🔧 Settings",
+        "settings_title": "Settings",
         "settings_subtitle": "Tune language, sync, and backup behavior for this PC. Changes apply immediately.",
         "section_general": "General",
         "section_general_sub": "Language, theme, and Steam path",
@@ -388,7 +391,7 @@ TRANSLATIONS = {
         "interval_minutes": "Interval (min)",
         "file_watch": "File Change Monitor",
         "cooldown_seconds": "Cooldown (sec)",
-        "watchdog_missing": "⚠ watchdog is not installed. Run: pip install watchdog",
+        "watchdog_missing": "watchdog is not installed. Run: pip install watchdog",
         "auto_sync": "Automatic Save Sync",
         "sync_folder": "Sync Folder",
         "sync_folder_placeholder": "Choose a cloud folder (OneDrive / Dropbox / Google Drive)",
@@ -426,7 +429,7 @@ TRANSLATIONS = {
         "webdav_missing": "WebDAV component unavailable. Run: pip install webdavclient3",
         "minimize_tray": "Close to System Tray",
         "minimize_tray_desc": "When closing the window, keep the app running in the tray",
-        "tray_missing": "⚠ pystray is not installed. Run: pip install pystray",
+        "tray_missing": "pystray is not installed. Run: pip install pystray",
         "autostart": "Launch at Startup",
         "autostart_desc": "Start automatically when you sign in to Windows",
         "autostart_minimize": "Minimize on Startup Launch",
@@ -9359,7 +9362,8 @@ class SaveChangeHandler(FileSystemEventHandler):
             self._timer = None
             if self._closed or not self._pending or self._backup_running:
                 return
-            if self._is_game_running():
+            scheduled_snapshot = self._pending_note == "定时自动备份"
+            if not scheduled_snapshot and self._is_game_running():
                 deferred_now = not self._deferred_for_running
                 self._deferred_for_running = True
                 self._arm_timer_locked(self._running_retry_delay)
@@ -9455,8 +9459,29 @@ C_NAV_ACTIVE   = ("#e0e7ff", "#2d3055")
 C_NAV_ACT_TEXT = ("#4f46e5", "#a5b4fc")
 C_CARD_BG      = ("#ffffff", "#1e1f33")
 C_MAIN_BG      = ("#f8fafc", "#111218")
-C_SUBTLE_TEXT  = ("#94a3b8", "#71717a")
+C_SUBTLE_TEXT  = ("#64748b", "#a1a1aa")
 C_BODY_TEXT    = ("#334155", "#e2e8f0")
+
+# Monochrome UI symbols keep controls consistent across light and dark themes.
+UI_ICON = {
+    "app": "◆",
+    "home": "⌂",
+    "scan": "⌕",
+    "games": "▣",
+    "backup": "▤",
+    "settings": "⚙",
+    "folder": "□",
+    "copy": "⎘",
+    "more": "⋯",
+    "refresh": "↻",
+    "sync": "⇅",
+    "add": "+",
+    "remove": "−",
+    "back": "‹",
+    "next": "›",
+    "ok": "✓",
+    "warning": "!",
+}
 
 # 按钮色
 BTN_PRIMARY    = "#6366f1"   # indigo
@@ -9509,6 +9534,7 @@ class SteamSaveManager(ctk.CTk):
         self._scan_lib_folders: list[str] = []
         self._scan_choice_vars: dict[str, ctk.StringVar] = {}
         self._scan_choice_labels: dict[str, dict[str, str]] = {}
+        self._scan_selected_vars: dict[str, ctk.StringVar] = {}
         self._scan_cards: dict[str, dict] = {}
         self._steam_account_lookup_cache = {"steam_path": None, "accountid_map": {}, "steam64_map": {}}
         self._scan_info_banner = None
@@ -9547,13 +9573,30 @@ class SteamSaveManager(ctk.CTk):
         self._busy_widgets: weakref.WeakSet = weakref.WeakSet()
         self._responsive_labels: list[tuple[Any, float, int]] = []
         self._responsive_job = None
+        self._responsive_mode = None
+        self._sidebar = None
+        self._sidebar_collapsed = False
+        self._sidebar_logo_labels: list[Any] = []
+        self._sidebar_logo_frame = None
+        self._sidebar_logo_label = None
+        self._app_logo_image = None
+        self._sidebar_nav_label = None
+        self._nav_meta: dict[str, tuple[str, str]] = {}
+        self._active_nav_key = None
+        self._settings_pages: dict[str, Any] = {}
+        self._detail_pages: dict[str, Any] = {}
         self._settings_section_positions: dict[str, Any] = {}
         self._popup_windows: weakref.WeakSet = weakref.WeakSet()
         self._popup_restore_grab: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
 
         self.title(self.t("product_title"))
-        self.geometry("1080x720")
-        self.minsize(920, 620)
+        try:
+            if APP_ICON_PATH.is_file():
+                self.iconbitmap(str(APP_ICON_PATH))
+        except Exception:
+            pass
+        self.geometry("1120x760")
+        self.minsize(760, 560)
         self._center_main_window()
         ctk.set_appearance_mode(self.cfg.get("theme", "light"))
         ctk.set_default_color_theme("blue")
@@ -9574,6 +9617,7 @@ class SteamSaveManager(ctk.CTk):
         self._build_settings_frame()
         self._build_game_detail_frame()
         self._show_frame("home")
+        self.after(0, self._schedule_responsive_update)
 
         if self.cfg.get("auto_backup_enabled"):
             self._start_auto_backup()
@@ -9661,10 +9705,19 @@ class SteamSaveManager(ctk.CTk):
         except Exception:
             self._responsive_job = None
 
+    def _logical_window_width(self) -> int:
+        try:
+            physical_width = max(float(self.winfo_width()), 1.0)
+            window_scaling = max(float(self._get_window_scaling()), 0.1)
+            return max(int(round(physical_width / window_scaling)), 1)
+        except Exception:
+            return 1120
+
     def _update_responsive_text(self):
         self._responsive_job = None
         try:
-            available = max(self.winfo_width() - 260, 360)
+            sidebar_width = 76 if getattr(self, "_sidebar_collapsed", False) else 220
+            available = max(self._logical_window_width() - sidebar_width - 40, 360)
         except Exception:
             available = 720
         alive = []
@@ -9678,6 +9731,105 @@ class SteamSaveManager(ctk.CTk):
             except Exception:
                 pass
         self._responsive_labels = alive
+        self._apply_responsive_layout()
+
+    @staticmethod
+    def _grid_columns(frame, count: int):
+        if frame is None:
+            return
+        for column in range(6):
+            try:
+                frame.grid_columnconfigure(column, weight=1 if column < count else 0)
+            except Exception:
+                pass
+
+    def _apply_responsive_layout(self):
+        width = self._logical_window_width()
+        collapsed = width < 1000
+        content_width = width - (76 if collapsed else 220)
+        mode = "compact" if content_width < 820 else "wide"
+        self._responsive_mode = mode
+        self._sidebar_collapsed = collapsed
+
+        sidebar = getattr(self, "_sidebar", None)
+        if sidebar is not None:
+            sidebar.configure(width=76 if collapsed else 220)
+        for label in getattr(self, "_sidebar_logo_labels", []):
+            if collapsed:
+                label.grid_remove()
+            else:
+                label.grid()
+        logo_frame = getattr(self, "_sidebar_logo_frame", None)
+        logo_label = getattr(self, "_sidebar_logo_label", None)
+        if logo_frame is not None and logo_label is not None:
+            if collapsed:
+                logo_frame.grid_configure(padx=10)
+                logo_frame.grid_columnconfigure(0, weight=1)
+                logo_frame.grid_columnconfigure(1, weight=0)
+                logo_label.grid_configure(
+                    row=0, column=0, rowspan=2, padx=0, sticky="")
+            else:
+                logo_frame.grid_configure(padx=18)
+                logo_frame.grid_columnconfigure(0, weight=0)
+                logo_frame.grid_columnconfigure(1, weight=1)
+                logo_label.grid_configure(
+                    row=0, column=0, rowspan=2, padx=(0, 10), sticky="w")
+        nav_label = getattr(self, "_sidebar_nav_label", None)
+        if nav_label is not None:
+            if collapsed:
+                nav_label.grid_remove()
+            else:
+                nav_label.grid()
+        status_label = getattr(self, "_status_label", None)
+        if status_label is not None:
+            if collapsed:
+                status_label.pack_forget()
+            elif not status_label.winfo_manager():
+                status_label.pack(pady=(0, 2), before=self._sidebar_version_label)
+        for key, button in getattr(self, "_nav_buttons", {}).items():
+            icon, label = self._nav_meta.get(key, ("", key))
+            button.configure(
+                text=icon if collapsed else f"{icon}  {label}",
+                anchor="center" if collapsed else "w",
+            )
+            button.grid_configure(padx=10 if collapsed else 12)
+
+        self._reflow_grid_widgets(getattr(self, "_home_stat_cards", []), 2 if mode == "compact" else 4)
+        self._reflow_grid_widgets(getattr(self, "_home_health_items", []), 2 if mode == "compact" else 4)
+        self._reflow_grid_widgets(getattr(self, "_home_action_buttons", []), 1 if mode == "compact" else 3)
+        self._reflow_grid_widgets(getattr(self, "_detail_stat_cards", []), 2 if mode == "compact" else 4)
+        self._reflow_grid_widgets(getattr(self, "_detail_action_buttons", []), 2 if mode == "compact" else 4)
+        for item in getattr(self, "_game_cards", {}).values():
+            for key in ("status", "backup"):
+                widget = item.get(key)
+                if widget is None:
+                    continue
+                if mode == "compact":
+                    widget.grid_remove()
+                else:
+                    widget.grid()
+        for item in getattr(self, "_backup_rows", {}).values():
+            widget = item.get("integrity")
+            if widget is not None:
+                if mode == "compact":
+                    widget.grid_remove()
+                else:
+                    widget.grid()
+
+    def _reflow_grid_widgets(self, widgets, columns: int):
+        widgets = [widget for widget in widgets if widget is not None]
+        if not widgets:
+            return
+        parent = widgets[0].master
+        self._grid_columns(parent, columns)
+        for index, widget in enumerate(widgets):
+            widget.grid_configure(
+                row=index // columns,
+                column=index % columns,
+                padx=5,
+                pady=5,
+                sticky="nsew",
+            )
 
     def _copy_to_clipboard(self, text: str, message: Optional[str] = None):
         try:
@@ -9748,6 +9900,25 @@ class SteamSaveManager(ctk.CTk):
         widget.bind("<ButtonPress>", _hide, add="+")
         return widget
 
+    def _show_action_menu(self, widget, actions):
+        menu = tkinter.Menu(self, tearoff=False)
+        for label, command, destructive in actions:
+            menu.add_command(label=label, command=command)
+            if destructive:
+                try:
+                    menu.entryconfigure("end", foreground=BTN_DANGER)
+                except Exception:
+                    pass
+        try:
+            x = widget.winfo_rootx() + widget.winfo_width() - 4
+            y = widget.winfo_rooty() + widget.winfo_height()
+            menu.tk_popup(x, y)
+        finally:
+            try:
+                menu.grab_release()
+            except Exception:
+                pass
+
     def _rebuild_ui(self, target_frame: Optional[str] = None):
         current = target_frame or getattr(self, "_current_frame", "home")
         detail_idx = getattr(self, "_detail_idx", None)
@@ -9755,6 +9926,8 @@ class SteamSaveManager(ctk.CTk):
             "scan_search": self._scan_search_var.get() if hasattr(self, "_scan_search_var") else "",
             "games_search": self._games_search_var.get() if hasattr(self, "_games_search_var") else "",
             "backup_filter": self._bk_var.get() if hasattr(self, "_bk_var") else "",
+            "settings_tab": self._settings_tab_codes.get(self._settings_tab_var.get(), "general") if hasattr(self, "_settings_tab_var") else "general",
+            "detail_tab": self._detail_tab_codes.get(self._detail_tab_var.get(), "overview") if hasattr(self, "_detail_tab_var") else "overview",
         }
         self._stop_detail_refresh()
         self.unbind_all("<MouseWheel>")
@@ -9765,6 +9938,15 @@ class SteamSaveManager(ctk.CTk):
         self._nav_buttons = {}
         self._busy_widgets = weakref.WeakSet()
         self._responsive_labels = []
+        self._responsive_mode = None
+        self._sidebar_logo_labels = []
+        self._sidebar_logo_frame = None
+        self._sidebar_logo_label = None
+        self._app_logo_image = None
+        self._nav_meta = {}
+        self._active_nav_key = None
+        self._settings_pages = {}
+        self._detail_pages = {}
         self._settings_section_positions = {}
         self._build_sidebar()
         self._build_home_frame()
@@ -9779,8 +9961,10 @@ class SteamSaveManager(ctk.CTk):
             self._games_search_var.set(saved_state["games_search"])
         if saved_state["backup_filter"] and hasattr(self, "_bk_var"):
             self._bk_var.set(saved_state["backup_filter"])
+        self._show_settings_page(saved_state["settings_tab"])
         if current == "game_detail" and detail_idx is not None and 0 <= detail_idx < len(self.cfg.get("games", [])):
             self._show_game_detail(detail_idx)
+            self._show_detail_page(saved_state["detail_tab"])
         else:
             self._show_frame(current if current in self._frames else "home")
         self._update_status()
@@ -9928,14 +10112,24 @@ class SteamSaveManager(ctk.CTk):
     def _create_popup(self, title: str, geometry: Optional[str] = None):
         window = ctk.CTkToplevel(self)
         window.title(title)
-        if geometry:
-            window.geometry(geometry)
         try:
             sw = self.winfo_screenwidth()
             sh = self.winfo_screenheight()
+            if geometry:
+                match = re.match(r"^(\d+)x(\d+)", geometry)
+                if match:
+                    requested_width, requested_height = map(int, match.groups())
+                    width = min(requested_width, max(sw - 100, 420))
+                    height = min(requested_height, max(sh - 120, 320))
+                    window.geometry(f"{width}x{height}")
+                    window.minsize(min(width, 440), min(height, 320))
+                else:
+                    window.geometry(geometry)
             window.maxsize(max(sw - 100, 400), max(sh - 100, 300))
         except Exception:
-            pass
+            if geometry:
+                window.geometry(geometry)
+        window.resizable(True, True)
         self._prepare_popup(window)
         return window
 
@@ -9976,8 +10170,19 @@ class SteamSaveManager(ctk.CTk):
         return self._show_modal_message(title, message, "question", parent=parent, buttons=[
             (self.bi("是", "Yes"), True, BTN_PRIMARY, BTN_PRIMARY_H),
             (self.bi("否", "No"), False, BTN_SECONDARY, BTN_SECONDARY_H),
-            (self.bi("取消", "Cancel"), None, BTN_DANGER, BTN_DANGER_H),
+            (self.bi("取消", "Cancel"), None, BTN_SECONDARY, BTN_SECONDARY_H),
         ])
+
+    @staticmethod
+    def _modal_safe_value(kind: str, buttons) -> Any:
+        if kind != "question":
+            return "ok"
+        values = [item[1] for item in buttons]
+        if None in values:
+            return None
+        if False in values:
+            return False
+        return values[-1] if values else None
 
     def _show_modal_message(self, title: str, message: str, kind: str = "info", parent=None, buttons=None):
         owner = self._resolve_dialog_parent(parent)
@@ -9989,10 +10194,16 @@ class SteamSaveManager(ctk.CTk):
                 owner.focus_force()
             except Exception:
                 pass
+        message_text = str(message or "")
+        visual_lines = sum(max(1, (len(line) + 53) // 54) for line in message_text.splitlines() or [""])
+        dialog_width = min(720, max(460, 440 + min(max((len(line) for line in message_text.splitlines()), default=0), 24) * 5))
+        dialog_height = min(520, max(220, 176 + visual_lines * 22))
         result = {"value": None}
         d = ctk.CTkToplevel(owner)
         d.title(title)
-        d.geometry("520x260")
+        d.geometry(f"{dialog_width}x{dialog_height}")
+        d.minsize(420, 210)
+        d.resizable(True, True)
         self._prepare_popup(d)
         d.grid_columnconfigure(0, weight=1)
         d.grid_rowconfigure(1, weight=1)
@@ -10018,10 +10229,23 @@ class SteamSaveManager(ctk.CTk):
         title_label.grid(row=0, column=1, sticky="ew")
         self._register_wrap(title_label, 0.58, 280)
 
-        body = ctk.CTkTextbox(d, font=font(12), wrap="word", fg_color=C_CARD_BG)
+        body_class = ctk.CTkScrollableFrame if visual_lines > 8 else ctk.CTkFrame
+        body = body_class(
+            d, fg_color=C_CARD_BG, corner_radius=6, border_width=1,
+            border_color=C_SIDEBAR_SEP)
         body.grid(row=1, column=0, padx=18, pady=(0, 14), sticky="nsew")
-        body.insert("1.0", str(message or ""))
-        body.configure(state="disabled")
+        message_label = ctk.CTkLabel(
+            body, text=message_text, font=font(13), text_color=C_BODY_TEXT,
+            anchor="nw", justify="left", wraplength=max(dialog_width - 76, 320))
+        message_label.pack(fill="both", expand=True, padx=12, pady=10, anchor="nw")
+
+        def _resize_message(event):
+            try:
+                message_label.configure(wraplength=max(event.width - 34, 280))
+            except Exception:
+                pass
+
+        body.bind("<Configure>", _resize_message, add="+")
 
         btns = ctk.CTkFrame(d, fg_color="transparent")
         btns.grid(row=2, column=0, padx=18, pady=(0, 18), sticky="e")
@@ -10036,13 +10260,23 @@ class SteamSaveManager(ctk.CTk):
                 pass
             d.destroy()
 
-        d.protocol("WM_DELETE_WINDOW", lambda: _choose(None if kind == "question" else "ok"))
+        safe_value = self._modal_safe_value(kind, buttons)
+        d.protocol("WM_DELETE_WINDOW", lambda: _choose(safe_value))
+        d.bind("<Escape>", lambda _event: _choose(safe_value), add="+")
+        focus_button = None
         for label, value, fg, hover in buttons:
-            ctk.CTkButton(
+            button = ctk.CTkButton(
                 btns, text=label, width=92, height=34, font=font(12, "bold"),
                 corner_radius=8, fg_color=fg, hover_color=hover,
+                text_color=C_BODY_TEXT if fg == BTN_SECONDARY else "#ffffff",
                 command=lambda v=value: _choose(v),
-            ).pack(side="left", padx=(8, 0))
+            )
+            button.pack(side="left", padx=(8, 0))
+            button.bind("<Return>", lambda _event, v=value: _choose(v), add="+")
+            if value == safe_value:
+                focus_button = button
+        if focus_button is not None:
+            d.after(80, lambda: focus_button.focus_set() if focus_button.winfo_exists() else None)
         d.wait_window()
         return result["value"]
 
@@ -10053,6 +10287,8 @@ class SteamSaveManager(ctk.CTk):
         d = ctk.CTkToplevel(owner)
         d.title(self.bi("发现新版本", "Update Available"))
         d.geometry("620x420")
+        d.minsize(500, 320)
+        d.resizable(True, True)
         self._prepare_popup(d)
         d.grid_columnconfigure(0, weight=1)
         d.grid_rowconfigure(1, weight=1)
@@ -10095,6 +10331,7 @@ class SteamSaveManager(ctk.CTk):
             d.destroy()
 
         d.protocol("WM_DELETE_WINDOW", lambda: _set_action("cancel"))
+        d.bind("<Escape>", lambda _event: _set_action("cancel"), add="+")
         ctk.CTkButton(
             btns,
             text=self.bi("立即下载", "Download Now"),
@@ -10109,13 +10346,16 @@ class SteamSaveManager(ctk.CTk):
             corner_radius=8, fg_color=BTN_BLUE, hover_color=BTN_BLUE_H,
             command=lambda: _set_action("browser"),
         ).pack(side="left", padx=(0, 8))
-        ctk.CTkButton(
+        later_button = ctk.CTkButton(
             btns,
             text=self.bi("稍后再说", "Later"),
             width=110, height=36, font=font(12, "bold"),
-            corner_radius=8, fg_color=BTN_PRIMARY, hover_color=BTN_PRIMARY_H,
+            corner_radius=8, fg_color=BTN_SECONDARY, hover_color=BTN_SECONDARY_H,
+            text_color=C_BODY_TEXT,
             command=lambda: _set_action("cancel"),
-        ).pack(side="left")
+        )
+        later_button.pack(side="left")
+        d.after(80, lambda: later_button.focus_set() if later_button.winfo_exists() else None)
 
         d.wait_window()
         return result["action"]
@@ -10159,6 +10399,7 @@ class SteamSaveManager(ctk.CTk):
     # ─── 侧边栏 ───
     def _build_sidebar(self):
         sb = ctk.CTkFrame(self, width=220, corner_radius=0, fg_color=C_SIDEBAR_BG)
+        self._sidebar = sb
         sb.grid(row=0, column=0, sticky="nsew")
         sb.grid_columnconfigure(0, weight=1)
         sb.grid_rowconfigure(8, weight=1)
@@ -10166,40 +10407,69 @@ class SteamSaveManager(ctk.CTk):
 
         # Logo 区域
         logo_frame = ctk.CTkFrame(sb, fg_color="transparent")
-        logo_frame.grid(row=0, column=0, padx=0, pady=(22, 0), sticky="ew")
-        logo_frame.grid_columnconfigure(0, weight=1)
-        ctk.CTkLabel(logo_frame, text="🎮", font=font(28)).grid(
-            row=0, column=0, pady=(0, 2))
-        ctk.CTkLabel(logo_frame, text=self.t("product_title"), font=font(16, "bold"),
-                     text_color=C_BODY_TEXT).grid(row=1, column=0, pady=(0, 4))
-        ctk.CTkLabel(logo_frame, text="Steam Save Manager",
-                     font=font(9), text_color=C_SUBTLE_TEXT).grid(
-            row=2, column=0, pady=(0, 12))
+        self._sidebar_logo_frame = logo_frame
+        logo_frame.grid(row=0, column=0, padx=18, pady=(20, 14), sticky="ew")
+        logo_frame.grid_columnconfigure(1, weight=1)
+        try:
+            if APP_LOGO_PATH.is_file():
+                with Image.open(APP_LOGO_PATH) as logo_source:
+                    logo_image = logo_source.convert("RGBA").copy()
+                self._app_logo_image = ctk.CTkImage(
+                    light_image=logo_image,
+                    dark_image=logo_image,
+                    size=(42, 42),
+                )
+        except Exception:
+            logger.debug("Unable to load app logo", exc_info=True)
+            self._app_logo_image = None
+        logo_label = ctk.CTkLabel(
+            logo_frame,
+            text="" if self._app_logo_image else UI_ICON["app"],
+            image=self._app_logo_image,
+            width=42,
+            height=42,
+            font=font(25, "bold"),
+            text_color=BTN_PRIMARY,
+        )
+        self._sidebar_logo_label = logo_label
+        logo_label.grid(row=0, column=0, rowspan=2, padx=(0, 10), sticky="w")
+        product_label = ctk.CTkLabel(
+            logo_frame, text=self.t("product_title"), font=font(16, "bold"),
+            text_color=C_BODY_TEXT, anchor="w")
+        product_label.grid(row=0, column=1, sticky="sw")
+        product_subtitle = ctk.CTkLabel(
+            logo_frame, text="Steam Save Manager", font=font(9),
+            text_color=C_SUBTLE_TEXT, anchor="w")
+        product_subtitle.grid(row=1, column=1, sticky="nw")
+        self._sidebar_logo_labels = [product_label, product_subtitle]
 
         ctk.CTkFrame(sb, height=1, fg_color=C_SIDEBAR_SEP).grid(
             row=1, column=0, padx=18, sticky="ew", pady=(0, 12))
 
         # 导航分组标签
-        ctk.CTkLabel(sb, text=self.t("nav_section"), font=font(10),
-                     text_color=C_SUBTLE_TEXT).grid(
+        self._sidebar_nav_label = ctk.CTkLabel(
+            sb, text=self.t("nav_section"), font=font(10), text_color=C_SUBTLE_TEXT)
+        self._sidebar_nav_label.grid(
             row=2, column=0, padx=22, pady=(0, 4), sticky="w")
 
         nav = [
-            ("🏠", self.t("nav_home"),      "home"),
-            ("🔍", self.t("nav_scan"),      "scan"),
-            ("🎮", self.t("nav_games"),     "games"),
-            ("💾", self.t("nav_backup"),    "backup"),
-            ("🔧", self.t("nav_settings"),  "settings"),
+            (UI_ICON["home"], self.t("nav_home"),      "home"),
+            (UI_ICON["scan"], self.t("nav_scan"),      "scan"),
+            (UI_ICON["games"], self.t("nav_games"),    "games"),
+            (UI_ICON["backup"], self.t("nav_backup"),  "backup"),
+            (UI_ICON["settings"], self.t("nav_settings"), "settings"),
         ]
         self._nav_buttons: dict[str, ctk.CTkButton] = {}
         for i, (icon, label, key) in enumerate(nav):
             btn = ctk.CTkButton(
-                sb, text=f"  {icon}   {label}", anchor="w", font=font(13),
-                fg_color="transparent", text_color=C_NAV_TEXT,
+                sb, text=f"{icon}  {label}", anchor="w", font=font(13),
+                fg_color=C_SIDEBAR_BG, text_color=C_NAV_TEXT,
                 hover_color=C_NAV_HOVER, height=40, corner_radius=8,
                 command=lambda k=key: self._show_frame(k))
             btn.grid(row=i + 3, column=0, padx=12, pady=2, sticky="ew")
             self._nav_buttons[key] = btn
+            self._nav_meta[key] = (icon, label)
+            self._attach_tooltip(btn, lambda text=label: text)
 
         # 底部状态区域
         bottom = ctk.CTkFrame(sb, fg_color="transparent")
@@ -10218,15 +10488,24 @@ class SteamSaveManager(ctk.CTk):
         self._apply_sidebar_version_state()
 
     def _highlight_nav(self, active_key: str):
-        for key, btn in self._nav_buttons.items():
-            if key == active_key:
-                btn.configure(fg_color=C_NAV_ACTIVE,
-                              text_color=C_NAV_ACT_TEXT,
-                              font=font(13, "bold"))
-            else:
-                btn.configure(fg_color="transparent",
-                              text_color=C_NAV_TEXT,
-                              font=font(13))
+        previous_key = getattr(self, "_active_nav_key", None)
+        if previous_key == active_key:
+            return
+        previous = self._nav_buttons.get(previous_key)
+        if previous is not None:
+            previous.configure(
+                fg_color=C_SIDEBAR_BG,
+                text_color=C_NAV_TEXT,
+                font=font(13),
+            )
+        current = self._nav_buttons.get(active_key)
+        if current is not None:
+            current.configure(
+                fg_color=C_NAV_ACTIVE,
+                text_color=C_NAV_ACT_TEXT,
+                font=font(13, "bold"),
+            )
+        self._active_nav_key = active_key
 
     def _show_frame(self, name: str):
         self._stop_detail_refresh()
@@ -10255,54 +10534,79 @@ class SteamSaveManager(ctk.CTk):
         home_subtitle.grid(row=1, column=0, padx=32, pady=(0, 18), sticky="ew")
         self._register_wrap(home_subtitle, 0.78, 360)
 
-        # 统计卡片
+        # 关键状态
         stats = ctk.CTkFrame(frame, fg_color="transparent")
         stats.grid(row=2, column=0, padx=28, sticky="ew")
         stats.grid_columnconfigure((0, 1, 2, 3), weight=1)
         self._stat_cards = {}
+        self._home_stat_cards = []
         defs = [
-            ("games",   self.t("stat_games"),   self.t("value_games", count=0), "#eef2ff", "#2e2b6b", "#6366f1"),
-            ("backups", self.t("stat_backups"), self.t("value_backups", count=0), "#ecfdf5", "#0c4535", "#10b981"),
-            ("auto",    self.t("stat_auto"),    self.t("switch_off"),  "#fff7ed", "#5e1e0c", "#f97316"),
-            ("watch",   self.t("stat_watch"),   self.t("switch_off"),  "#fdf2f8", "#6f0f33", "#ec4899"),
+            ("games", self.t("stat_games"), "0", BTN_PRIMARY),
+            ("backups", self.t("stat_backups"), "0", BTN_SUCCESS),
+            ("last", self.bi("最近备份", "Last Backup"), self.bi("暂无", "None"), BTN_BLUE),
+            ("cloud", self.bi("云同步", "Cloud Sync"), self.bi("已关闭", "Off"), C_SUBTLE_TEXT),
         ]
-        for col, (key, title, default, lbg, dbg, accent) in enumerate(defs):
-            card = ctk.CTkFrame(stats, fg_color=(lbg, dbg), corner_radius=12)
+        for col, (key, title, default, accent) in enumerate(defs):
+            card = ctk.CTkFrame(
+                stats, fg_color=C_CARD_BG, corner_radius=8,
+                border_width=1, border_color=C_SIDEBAR_SEP)
             card.grid(row=0, column=col, padx=5, pady=5, sticky="nsew")
             ctk.CTkLabel(card, text=title, font=font(12),
                          text_color=C_SUBTLE_TEXT).grid(
-                row=0, column=0, padx=16, pady=(14, 0), sticky="w")
-            vl = ctk.CTkLabel(card, text=default, font=font(22, "bold"),
-                              text_color=(accent, accent))
-            vl.grid(row=1, column=0, padx=16, pady=(2, 16), sticky="w")
+                row=0, column=0, padx=14, pady=(12, 0), sticky="w")
+            vl = ctk.CTkLabel(card, text=default, font=font(19, "bold"),
+                              text_color=accent)
+            vl.grid(row=1, column=0, padx=14, pady=(2, 12), sticky="w")
             self._stat_cards[key] = vl
+            self._home_stat_cards.append(card)
+
+        health = ctk.CTkFrame(
+            frame, fg_color=C_CARD_BG, corner_radius=8,
+            border_width=1, border_color=C_SIDEBAR_SEP)
+        health.grid(row=3, column=0, padx=32, pady=(10, 0), sticky="ew")
+        health.grid_columnconfigure((0, 1, 2, 3), weight=1)
+        self._home_health_labels = {}
+        self._home_health_items = []
+        for col, key in enumerate(("scheduled", "watch", "last_sync", "pending")):
+            label = ctk.CTkLabel(
+                health, text="", height=34, font=font(11),
+                text_color=C_BODY_TEXT, anchor="w")
+            label.grid(row=0, column=col, padx=12, pady=4, sticky="ew")
+            self._home_health_labels[key] = label
+            self._home_health_items.append(label)
 
         # 按钮
         bf = ctk.CTkFrame(frame, fg_color="transparent")
-        bf.grid(row=3, column=0, padx=32, pady=(16, 8), sticky="ew")
+        bf.grid(row=4, column=0, padx=32, pady=(12, 8), sticky="ew")
         bf.grid_columnconfigure((0, 1, 2), weight=1, uniform="home_actions")
-        self._register_busy_widget(ctk.CTkButton(
-            bf, text=self.t("home_backup_all"), height=42,
-            font=font(13, "bold"), corner_radius=10,
-            fg_color=BTN_SUCCESS, hover_color=BTN_SUCCESS_H,
-            command=self._backup_all)).grid(row=0, column=0, padx=(0, 8), sticky="ew")
-        self._register_busy_widget(ctk.CTkButton(
-            bf, text=self.t("home_sync_all"), height=42,
-            font=font(13, "bold"), corner_radius=10,
-            fg_color=BTN_BLUE, hover_color=BTN_BLUE_H,
-            command=self._manual_sync_all)).grid(row=0, column=1, padx=8, sticky="ew")
-        ctk.CTkButton(
-            bf, text=self.t("home_scan"), height=42,
-            font=font(13, "bold"), corner_radius=10,
+        backup_all_btn = self._register_busy_widget(ctk.CTkButton(
+            bf, text=f'{UI_ICON["refresh"]}  {self.bi("备份全部", "Back Up All")}', height=40,
+            font=font(13, "bold"), corner_radius=8,
             fg_color=BTN_PRIMARY, hover_color=BTN_PRIMARY_H,
-            command=lambda: self._show_frame("scan")).grid(row=0, column=2, padx=(8, 0), sticky="ew")
+            command=self._backup_all))
+        sync_all_btn = self._register_busy_widget(ctk.CTkButton(
+            bf, text=f'{UI_ICON["sync"]}  {self.bi("立即同步", "Sync Now")}', height=40,
+            font=font(13, "bold"), corner_radius=8,
+            fg_color=BTN_SECONDARY, hover_color=BTN_SECONDARY_H,
+            text_color=C_BODY_TEXT, command=self._manual_sync_all))
+        scan_btn = ctk.CTkButton(
+            bf, text=f'{UI_ICON["scan"]}  {self.bi("扫描游戏", "Scan Games")}', height=40,
+            font=font(13, "bold"), corner_radius=8,
+            fg_color="transparent", border_width=1, border_color=C_SIDEBAR_SEP,
+            text_color=C_BODY_TEXT, hover_color=C_NAV_HOVER,
+            command=lambda: self._show_frame("scan"))
+        self._home_action_buttons = [backup_all_btn, sync_all_btn, scan_btn]
+        for col, button in enumerate(self._home_action_buttons):
+            button.grid(row=0, column=col, padx=5, pady=5, sticky="ew")
 
         # 最近备份
         self._home_recent = ctk.CTkScrollableFrame(
-            frame, label_text=self.t("home_recent"), label_font=font(15, "bold"),
-            height=260, corner_radius=12, fg_color=C_CARD_BG)
-        self._home_recent.grid(row=4, column=0, padx=30, pady=(18, 24), sticky="nsew")
-        frame.grid_rowconfigure(4, weight=1)
+            frame, label_text=self.bi("最近备份", "Recent Backups"), label_font=font(14, "bold"),
+            label_anchor="w", label_fg_color=C_CARD_BG, label_text_color=C_BODY_TEXT,
+            height=260, corner_radius=8, border_width=1, border_color=C_SIDEBAR_SEP,
+            fg_color=C_CARD_BG)
+        self._home_recent.grid(row=5, column=0, padx=30, pady=(12, 24), sticky="nsew")
+        frame.grid_rowconfigure(5, weight=1)
         self._home_recent_rows = {}
         self._home_recent_empty_label = ctk.CTkLabel(
             self._home_recent,
@@ -10314,14 +10618,48 @@ class SteamSaveManager(ctk.CTk):
     def _refresh_home(self):
         games = self.cfg.get("games", [])
         total = sum(self._get_game_backup_count_cached(g) for g in games)
-        auto = self.t("switch_on") if self.cfg.get("auto_backup_enabled") else self.t("switch_off")
-        watch = self.t("switch_on") if self.cfg.get("watch_enabled") else self.t("switch_off")
-        self._stat_cards["games"].configure(text=self.t("value_games", count=len(games)))
-        self._stat_cards["backups"].configure(text=self.t("value_backups", count=total))
-        self._stat_cards["auto"].configure(text=auto)
-        self._stat_cards["watch"].configure(text=watch)
-
         all_b = self._get_recent_backups_cached(15)
+        pending_conflicts = sum(
+            1 for game in games
+            if get_game_sync_state(self.cfg, game).get("pending_conflict"))
+        retry_count = len(get_sync_retry_queue(self.cfg))
+        sync_enabled = bool(self.cfg.get("sync_enabled"))
+        backend_issue = get_sync_backend_issue(self.cfg.get("sync_folder", ""), self.cfg) if sync_enabled else "disabled"
+        if not sync_enabled:
+            cloud_text, cloud_color = self.bi("已关闭", "Off"), C_SUBTLE_TEXT
+        elif pending_conflicts:
+            cloud_text, cloud_color = self.bi(f"{pending_conflicts} 个冲突", f"{pending_conflicts} conflicts"), BTN_DANGER
+        elif retry_count:
+            cloud_text, cloud_color = self.bi(f"{retry_count} 项重试", f"{retry_count} retries"), BTN_WARN
+        elif backend_issue:
+            cloud_text, cloud_color = self.bi("未配置", "Not configured"), BTN_WARN
+        else:
+            cloud_text, cloud_color = self.bi("已就绪", "Ready"), BTN_SUCCESS
+
+        last_backup = self._fmt_ts(all_b[0]["timestamp"])[5:16] if all_b else self.bi("暂无", "None")
+        self._stat_cards["games"].configure(text=str(len(games)))
+        self._stat_cards["backups"].configure(text=str(total))
+        self._stat_cards["last"].configure(text=last_backup)
+        self._stat_cards["cloud"].configure(text=cloud_text, text_color=cloud_color)
+        auto_text = self.bi("定时备份：开启", "Scheduled backup: On") if self.cfg.get("auto_backup_enabled") else self.bi("定时备份：关闭", "Scheduled backup: Off")
+        watch_text = self.bi("文件监控：开启", "File watch: On") if self.cfg.get("watch_enabled") else self.bi("文件监控：关闭", "File watch: Off")
+        pending_text = self.bi(
+            f"待处理：{pending_conflicts + retry_count}",
+            f"Pending: {pending_conflicts + retry_count}")
+        sync_times = [
+            str(get_game_sync_state(self.cfg, game).get("updated_at", ""))
+            for game in games
+            if get_game_sync_state(self.cfg, game).get("updated_at")
+        ]
+        latest_sync = max(sync_times).replace("T", " ")[5:16] if sync_times else self.bi("暂无", "None")
+        self._home_health_labels["scheduled"].configure(text=auto_text)
+        self._home_health_labels["watch"].configure(text=watch_text)
+        self._home_health_labels["last_sync"].configure(
+            text=self.bi(f"最近同步：{latest_sync}", f"Last sync: {latest_sync}"))
+        self._home_health_labels["pending"].configure(
+            text=pending_text,
+            text_color=BTN_WARN if pending_conflicts + retry_count else C_BODY_TEXT)
+
         for item in self._home_recent_rows.values():
             item["row"].pack_forget()
         if not all_b:
@@ -10336,31 +10674,45 @@ class SteamSaveManager(ctk.CTk):
             item = self._home_recent_rows.get(key)
             if item is None:
                 row = ctk.CTkFrame(self._home_recent,
-                                   fg_color=("#f1f5f9", "#252640"), corner_radius=8)
+                                   fg_color=("#f8fafc", "#252640"), corner_radius=4)
+                row.grid_columnconfigure(1, weight=1)
                 title = ctk.CTkLabel(
-                    row, text="", font=font(12, "bold"), text_color=C_BODY_TEXT,
-                    wraplength=240
+                    row, text="", font=font(12, "bold"), text_color=C_BODY_TEXT, anchor="w"
                 )
-                title.pack(side="left", padx=(12, 6), pady=7)
+                title.grid(row=0, column=0, padx=(12, 8), pady=8, sticky="w")
                 info_label = ctk.CTkLabel(
-                    row, text="", font=font(11), text_color=C_SUBTLE_TEXT,
-                    wraplength=320
+                    row, text="", font=font(11), text_color=C_SUBTLE_TEXT, anchor="w"
                 )
-                info_label.pack(side="left", padx=4, pady=7)
-                item = {"row": row, "title": title, "info": info_label}
+                info_label.grid(row=0, column=1, padx=4, pady=8, sticky="w")
+                view_button = ctk.CTkButton(
+                    row, text=UI_ICON["next"], width=32, height=28, corner_radius=6,
+                    fg_color="transparent", hover_color=C_NAV_HOVER, text_color=C_BODY_TEXT)
+                view_button.grid(row=0, column=2, padx=(6, 10), pady=6)
+                self._attach_tooltip(view_button, lambda: self.bi("查看该游戏的备份", "View this game's backups"))
+                item = {"row": row, "title": title, "info": info_label, "view": view_button}
                 self._home_recent_rows[key] = item
-            item["title"].configure(text=f"🎮 {b['game']}")
+            item["title"].configure(text=b["game"])
             info = f"{self._fmt_ts(b['timestamp'])}  ·  {fmt_size(b['size'])}"
             note_text = localize_backup_note(b.get("note", ""), cfg_language(self.cfg))
             if note_text:
-                info += f"  ·  📝 {note_text}"
+                info += f"  ·  {note_text}"
             item["info"].configure(text=info)
+            item["view"].configure(command=lambda name=b["game"]: self._open_backup_for_game(name))
             item["row"].pack(fill="x", padx=4, pady=2)
         stale_keys = [key for key in self._home_recent_rows.keys() if key not in active_keys]
         for key in stale_keys:
             item = self._home_recent_rows.pop(key, None)
             if item:
                 item["row"].destroy()
+
+    def _open_backup_for_game(self, game_name: str):
+        self._bk_var.set(game_name)
+        self._backup_page = 0
+        self._show_frame("backup")
+
+    def _open_settings_page(self, page_key: str):
+        self._show_frame("settings")
+        self._show_settings_page(page_key)
 
     # ─── 扫描游戏 ───
     def _build_scan_frame(self):
@@ -10371,26 +10723,28 @@ class SteamSaveManager(ctk.CTk):
         hdr = ctk.CTkFrame(frame, fg_color="transparent")
         hdr.grid(row=0, column=0, padx=32, pady=(28, 8), sticky="ew")
         hdr.grid_columnconfigure(0, weight=1)
-        ctk.CTkLabel(hdr, text=self.t("scan_title"),
+        ctk.CTkLabel(hdr, text=self.bi("扫描 Steam 游戏库", "Scan Steam Libraries"),
                      font=font(20, "bold")).grid(row=0, column=0, sticky="w")
         self._scan_add_all_btn = ctk.CTkButton(
-            hdr, text=self.t("scan_add_all"), width=120, height=38,
-            font=font(13, "bold"), corner_radius=10,
+            hdr, text=self.t("scan_add_all"), width=150, height=38,
+            font=font(13, "bold"), corner_radius=8,
             fg_color=BTN_PRIMARY, hover_color=BTN_PRIMARY_H,
             state="disabled", command=self._add_all_from_scan)
-        self._scan_add_all_btn.grid(row=0, column=1, padx=(0, 10), sticky="e")
+        self._scan_add_all_btn.grid(row=0, column=1, padx=(0, 8), sticky="e")
+        self._scan_add_all_btn.grid_remove()
         self._scan_start_btn = ctk.CTkButton(
             hdr, text=self.t("scan_start"), width=120, height=38,
-            font=font(13, "bold"), corner_radius=10,
-            fg_color=BTN_SUCCESS, hover_color=BTN_SUCCESS_H,
+            font=font(13, "bold"), corner_radius=8,
+            fg_color=BTN_PRIMARY, hover_color=BTN_PRIMARY_H,
             command=self._do_scan)
         self._scan_start_btn.grid(row=0, column=2, sticky="e")
         self._scan_cancel_btn = ctk.CTkButton(
             hdr, text=self.bi("取消", "Cancel"), width=92, height=38,
-            font=font(13, "bold"), corner_radius=10,
+            font=font(13, "bold"), corner_radius=8,
             fg_color=BTN_DANGER, hover_color=BTN_DANGER_H,
             state="disabled", command=self._cancel_scan)
         self._scan_cancel_btn.grid(row=0, column=3, padx=(10, 0), sticky="e")
+        self._scan_cancel_btn.grid_remove()
 
         self._scan_status = ctk.CTkLabel(
             frame, text=self.t("scan_hint"),
@@ -10412,12 +10766,12 @@ class SteamSaveManager(ctk.CTk):
         self._scan_search_entry.grid(row=0, column=0, sticky="ew")
 
         self._scan_scroll = ctk.CTkScrollableFrame(
-            frame, height=420, corner_radius=12, fg_color=C_CARD_BG)
+            frame, height=420, corner_radius=8, fg_color=C_CARD_BG)
         self._scan_scroll.grid(row=4, column=0, padx=30, pady=10, sticky="nsew")
         frame.grid_rowconfigure(4, weight=1)
         self._scan_cards = {}
         self._scan_info_banner = ctk.CTkFrame(
-            self._scan_scroll, fg_color=("#eef2ff", "#2e2b6b"), corner_radius=12
+            self._scan_scroll, fg_color=("#eef2ff", "#2e2b6b"), corner_radius=8
         )
         self._scan_info_label = ctk.CTkLabel(
             self._scan_info_banner, text="", font=font(11), justify="left", text_color=C_BODY_TEXT
@@ -10441,16 +10795,34 @@ class SteamSaveManager(ctk.CTk):
 
     def _set_scan_busy(self, busy: bool):
         self._scan_in_progress = busy
-        if self._scan_start_btn is not None:
-            self._scan_start_btn.configure(state="disabled" if busy else "normal")
-        if self._scan_cancel_btn is not None:
-            self._scan_cancel_btn.configure(state="normal" if busy else "disabled")
+        filtered_results = self._get_filtered_scan_results()
+        addable_count = sum(
+            1 for result in filtered_results
+            if self._scan_result_has_addable_paths(result) and self._is_scan_result_selected(result))
+        if self._scan_start_btn is not None and self._scan_cancel_btn is not None:
+            if busy:
+                self._scan_start_btn.grid_remove()
+                self._scan_cancel_btn.configure(state="normal")
+                self._scan_cancel_btn.grid()
+            else:
+                self._scan_cancel_btn.grid_remove()
+                self._scan_start_btn.configure(
+                    state="normal",
+                    text=self.bi("重新扫描", "Scan Again") if self._scan_results else self.t("scan_start"),
+                    fg_color=BTN_SECONDARY if addable_count else BTN_PRIMARY,
+                    hover_color=BTN_SECONDARY_H if addable_count else BTN_PRIMARY_H,
+                    text_color=C_BODY_TEXT if addable_count else "#ffffff",
+                )
+                self._scan_start_btn.grid()
         if self._scan_add_all_btn is not None:
-            filtered_results = self._get_filtered_scan_results()
-            can_add = bool(
-                not busy and any(self._scan_result_has_addable_paths(r) for r in filtered_results)
-            )
-            self._scan_add_all_btn.configure(state="normal" if can_add else "disabled")
+            can_add = bool(not busy and addable_count)
+            self._scan_add_all_btn.configure(
+                text=self.bi(f"添加已选项目（{addable_count}）", f"Add Selected ({addable_count})"),
+                state="normal" if can_add else "disabled")
+            if can_add:
+                self._scan_add_all_btn.grid()
+            else:
+                self._scan_add_all_btn.grid_remove()
         if self._scan_progress is not None and not busy and not self._scan_results:
             try:
                 self._scan_progress.set(0)
@@ -10477,14 +10849,16 @@ class SteamSaveManager(ctk.CTk):
                 pass
         for item in self._game_cards.values():
             try:
-                item["backup_btn"].configure(state=state)
-                item["delete_btn"].configure(state=state)
+                for key in ("backup_btn", "more_btn"):
+                    if item.get(key) is not None:
+                        item[key].configure(state=state)
             except Exception:
                 pass
         for item in self._backup_rows.values():
             try:
-                item["restore_btn"].configure(state=state)
-                item["delete_btn"].configure(state=state)
+                for key in ("restore_btn", "more_btn"):
+                    if item.get(key) is not None:
+                        item[key].configure(state=state)
             except Exception:
                 pass
 
@@ -10497,20 +10871,21 @@ class SteamSaveManager(ctk.CTk):
             ),
         )
 
+    def _is_scan_result_selected(self, result: dict) -> bool:
+        key = str(result.get("appid", ""))
+        variable = self._scan_selected_vars.get(key)
+        if variable is not None:
+            return variable.get() == "on"
+        candidate = (result.get("save_candidates") or [{}])[0]
+        return candidate.get("confidence", "low") in {"high", "medium"}
+
+    def _on_scan_selection_changed(self):
+        if not self._scan_in_progress:
+            self._set_scan_busy(False)
+
     def _scroll_settings_to_section(self, section_key: str):
-        canvas = getattr(self, "_settings_scroll", None)
-        target = self._settings_section_positions.get(section_key)
-        if canvas is None or target is None:
-            return
-        try:
-            canvas.update_idletasks()
-            bbox = canvas.bbox("all")
-            total_h = max((bbox[3] - bbox[1]) if bbox else 1, 1)
-            view_h = max(canvas.winfo_height(), 1)
-            y = max(target.winfo_y() - 8, 0)
-            canvas.yview_moveto(min(y / max(total_h - view_h, 1), 1.0))
-        except Exception:
-            pass
+        aliases = {"general": "general", "automation": "backup", "system": "system"}
+        self._show_settings_page(aliases.get(section_key, section_key))
 
     def _schedule_scan_search_render(self, *_args):
         if self._scan_search_job:
@@ -10613,6 +10988,10 @@ class SteamSaveManager(ctk.CTk):
                 pass
         self._games_search_job = self.after(180, self._run_games_refresh)
 
+    def _on_games_controls_changed(self, _value=None):
+        self._games_page = 0
+        self._refresh_games_list()
+
     def _run_games_refresh(self):
         self._games_search_job = None
         self._refresh_games_list()
@@ -10706,6 +11085,15 @@ class SteamSaveManager(ctk.CTk):
         self._backup_page = 0
         self._refresh_backup_list()
 
+    @staticmethod
+    def _backup_source_code(note: str) -> str:
+        text = str(note or "").casefold()
+        if any(token in text for token in ("sync", "同步")):
+            return "sync"
+        if any(token in text for token in ("auto", "scheduled", "file change", "自动", "定时", "文件变动", "退出")):
+            return "automatic"
+        return "manual"
+
     def _get_game_detail_metrics_cached(self, game: dict) -> dict:
         key = get_game_cache_key(game)
         now = time.time()
@@ -10774,7 +11162,7 @@ class SteamSaveManager(ctk.CTk):
         if self._scan_lib_folders:
             self._scan_info_banner.configure(fg_color=("#eef2ff", "#1e1b4b"))
             txt = self.bi("检测到的 Steam 库路径：\n", "Detected Steam library paths:\n") + "\n".join(
-                f"  📂 {p}" for p in self._scan_lib_folders)
+                f"  {p}" for p in self._scan_lib_folders)
             self._scan_info_label.configure(text=txt, font=font(11), text_color=C_BODY_TEXT, justify="left")
             self._scan_info_banner.pack(fill="x", padx=4, pady=(0, 8))
         else:
@@ -10792,7 +11180,7 @@ class SteamSaveManager(ctk.CTk):
                 if p
             )
         found = 0
-        addable = 0
+        selected_addable = 0
         filtered_results = self._get_filtered_scan_results()
         active_keys = set()
 
@@ -10816,7 +11204,7 @@ class SteamSaveManager(ctk.CTk):
             item = self._scan_cards.get(key)
             if item is None:
                 card = ctk.CTkFrame(self._scan_scroll,
-                                    fg_color=("#f1f5f9", "#252640"), corner_radius=12)
+                                    fg_color=("#f8fafc", "#252640"), corner_radius=4)
                 card.grid_columnconfigure(1, weight=1)
                 title = ctk.CTkLabel(card, text="", font=font(13, "bold"),
                                      text_color=C_BODY_TEXT)
@@ -10850,13 +11238,15 @@ class SteamSaveManager(ctk.CTk):
                     "right_top": right_top,
                     "right_bottom": right_bottom,
                     "status": None,
+                    "select": None,
                     "option": None,
+                    "copy_btn": None,
                     "folder_btn": None,
                     "add_btn": None,
                 }
                 self._scan_cards[key] = item
 
-            ico = "✔" if save_paths and not available_paths else ("✅" if save_paths else "❓")
+            ico = UI_ICON["ok"] if save_paths else UI_ICON["warning"]
             item["title"].configure(text=f"{ico} {name}")
 
             if save_paths:
@@ -10869,7 +11259,7 @@ class SteamSaveManager(ctk.CTk):
                     if len(save_paths) > 1 else ""
                 )
                 item["path"].configure(
-                    text=f"📁 {pd}{extra}",
+                    text=f"{pd}{extra}",
                     text_color=C_SUBTLE_TEXT,
                 )
                 item["path"]._full_path_text = "\n".join(save_paths)
@@ -10905,7 +11295,23 @@ class SteamSaveManager(ctk.CTk):
                     item["meta"].configure(text="")
                     item["meta"].grid_remove()
                 if available_paths:
-                    addable += 1
+                    selected_var = self._scan_selected_vars.get(key)
+                    if selected_var is None:
+                        default_selected = top_candidate.get("confidence", "low") in {"high", "medium"}
+                        selected_var = ctk.StringVar(value="on" if default_selected else "off")
+                        self._scan_selected_vars[key] = selected_var
+                    if selected_var.get() == "on":
+                        selected_addable += 1
+                    if item["select"] is None:
+                        item["select"] = ctk.CTkCheckBox(
+                            item["right_top"], text="", width=24,
+                            variable=selected_var, onvalue="on", offvalue="off",
+                            command=self._on_scan_selection_changed)
+                        item["select"].pack(side="left", padx=(0, 6))
+                    else:
+                        item["select"].configure(variable=selected_var)
+                        if not item["select"].winfo_manager():
+                            item["select"].pack(side="left", padx=(0, 6))
                     pv = self._scan_choice_vars.get(appid)
                     if pv is None:
                         pv = ctk.StringVar(value=option_labels[0])
@@ -10923,14 +11329,27 @@ class SteamSaveManager(ctk.CTk):
                             item["option"].pack(side="left")
                     if item["folder_btn"] is None:
                         item["folder_btn"] = ctk.CTkButton(
-                            item["right_bottom"], text="📁", width=36, height=28,
+                            item["right_bottom"], text=UI_ICON["folder"], width=36, height=28,
                             font=font(14), corner_radius=6,
-                            fg_color=BTN_WARN, hover_color=BTN_WARN_H,
+                            fg_color=BTN_SECONDARY, hover_color=BTN_SECONDARY_H,
+                            text_color=C_BODY_TEXT,
                         )
                         item["folder_btn"].pack(side="left")
                     elif not item["folder_btn"].winfo_manager():
                         item["folder_btn"].pack(side="left")
                     item["folder_btn"].configure(command=lambda a=appid, n=name: self._override_scan_result_path(a, n))
+                    if item["copy_btn"] is None:
+                        item["copy_btn"] = ctk.CTkButton(
+                            item["right_bottom"], text=UI_ICON["copy"], width=36, height=28,
+                            font=font(14), corner_radius=6,
+                            fg_color="transparent", hover_color=C_NAV_HOVER,
+                            text_color=C_BODY_TEXT)
+                        item["copy_btn"].pack(side="left", padx=(6, 0))
+                        self._attach_tooltip(item["copy_btn"], lambda: self.bi("复制存档路径", "Copy save path"))
+                    elif not item["copy_btn"].winfo_manager():
+                        item["copy_btn"].pack(side="left", padx=(6, 0))
+                    item["copy_btn"].configure(
+                        command=lambda text="\n".join(save_paths): self._copy_to_clipboard(text))
                     if item["add_btn"] is None:
                         item["add_btn"] = ctk.CTkButton(
                             item["right_bottom"], text=self.bi("添加", "Add"), width=64, height=28,
@@ -10944,10 +11363,14 @@ class SteamSaveManager(ctk.CTk):
                     if item["status"] is not None:
                         item["status"].grid_remove()
                 else:
+                    if item["select"] is not None:
+                        item["select"].pack_forget()
                     if item["option"] is not None:
                         item["option"].pack_forget()
                     if item["folder_btn"] is not None:
                         item["folder_btn"].pack_forget()
+                    if item["copy_btn"] is not None:
+                        item["copy_btn"].pack_forget()
                     if item["add_btn"] is not None:
                         item["add_btn"].pack_forget()
                     if item["status"] is None:
@@ -10959,6 +11382,8 @@ class SteamSaveManager(ctk.CTk):
                     )
                     item["status"].grid(row=0, column=0, padx=14, sticky="e")
             else:
+                if item["select"] is not None:
+                    item["select"].pack_forget()
                 item["path"].configure(
                     text=self.bi("未检测到存档路径", "No save path detected"),
                     text_color=("#ea580c", "#fb923c"),
@@ -10972,12 +11397,15 @@ class SteamSaveManager(ctk.CTk):
                     item["add_btn"].pack_forget()
                 if item["folder_btn"] is None:
                     item["folder_btn"] = ctk.CTkButton(
-                        item["right_bottom"], text="📁", width=36, height=28,
+                        item["right_bottom"], text=UI_ICON["folder"], width=36, height=28,
                         font=font(14), corner_radius=6,
-                        fg_color=BTN_WARN, hover_color=BTN_WARN_H,
+                        fg_color=BTN_SECONDARY, hover_color=BTN_SECONDARY_H,
+                        text_color=C_BODY_TEXT,
                     )
                     item["folder_btn"].pack(side="left")
                 item["folder_btn"].configure(command=lambda a=appid, n=name: self._override_scan_result_path(a, n))
+                if item["copy_btn"] is not None:
+                    item["copy_btn"].pack_forget()
                 if item["status"] is not None:
                     item["status"].grid_remove()
 
@@ -10990,6 +11418,7 @@ class SteamSaveManager(ctk.CTk):
                 item["card"].destroy()
             self._scan_choice_vars.pop(key, None)
             self._scan_choice_labels.pop(key, None)
+            self._scan_selected_vars.pop(key, None)
 
         if not self._scan_in_progress:
             self._scan_status.configure(
@@ -10998,7 +11427,17 @@ class SteamSaveManager(ctk.CTk):
                     f"Scan complete: found {len(self._scan_results)} installed games, detected save paths for {found}, using {self._scan_worker_count} threads ({self._scan_profile_label(self._scan_storage_profile)})",
                 ))
         if self._scan_add_all_btn is not None:
-            self._scan_add_all_btn.configure(state="normal" if addable and not self._scan_in_progress else "disabled")
+            self._scan_add_all_btn.configure(
+                text=self.bi(f"添加已选项目（{selected_addable}）", f"Add Selected ({selected_addable})"),
+                state="normal" if selected_addable and not self._scan_in_progress else "disabled")
+            if selected_addable and not self._scan_in_progress:
+                self._scan_add_all_btn.grid()
+                self._scan_start_btn.configure(
+                    text=self.bi("重新扫描", "Scan Again"),
+                    fg_color=BTN_SECONDARY, hover_color=BTN_SECONDARY_H,
+                    text_color=C_BODY_TEXT)
+            else:
+                self._scan_add_all_btn.grid_remove()
 
     def _finish_scan_with_error(self, message: str):
         self._scan_results = []
@@ -11010,6 +11449,7 @@ class SteamSaveManager(ctk.CTk):
         self._scan_cards.clear()
         self._scan_choice_vars = {}
         self._scan_choice_labels = {}
+        self._scan_selected_vars = {}
         self._scan_empty_label.pack_forget()
         self._scan_info_banner.configure(fg_color=("#fef2f2", "#450a0a"))
         self._scan_info_label.configure(
@@ -11139,6 +11579,7 @@ class SteamSaveManager(ctk.CTk):
         self._scan_lib_folders = []
         self._scan_choice_vars = {}
         self._scan_choice_labels = {}
+        self._scan_selected_vars = {}
         for item in self._scan_cards.values():
             item["card"].destroy()
         self._scan_cards.clear()
@@ -11315,7 +11756,7 @@ class SteamSaveManager(ctk.CTk):
         added = 0
         for result in self._get_filtered_scan_results():
             appid = result.get("appid")
-            if not result.get("save_paths"):
+            if not result.get("save_paths") or not self._is_scan_result_selected(result):
                 continue
             selected_value = self._scan_choice_vars.get(appid).get() if appid in self._scan_choice_vars else result["save_paths"][0]
             selected = self._resolve_scan_selected_path(appid, selected_value)
@@ -11389,10 +11830,10 @@ class SteamSaveManager(ctk.CTk):
         hdr = ctk.CTkFrame(frame, fg_color="transparent")
         hdr.grid(row=0, column=0, padx=32, pady=(28, 10), sticky="ew")
         hdr.grid_columnconfigure(0, weight=1)
-        ctk.CTkLabel(hdr, text=self.bi("🎮 游戏列表", "🎮 Games"), font=font(20, "bold")).grid(
+        ctk.CTkLabel(hdr, text=self.bi("游戏列表", "Games"), font=font(20, "bold")).grid(
             row=0, column=0, sticky="w")
-        ctk.CTkButton(hdr, text=self.bi("+ 手动添加", "+ Add Manually"), width=110, height=36,
-                      font=font(13), corner_radius=10,
+        ctk.CTkButton(hdr, text=f'{UI_ICON["add"]}  {self.bi("手动添加", "Add Manually")}', width=116, height=36,
+                      font=font(13), corner_radius=8,
                       fg_color=BTN_PRIMARY, hover_color=BTN_PRIMARY_H,
                       command=self._add_game_dialog).grid(
             row=0, column=1, sticky="e")
@@ -11407,9 +11848,40 @@ class SteamSaveManager(ctk.CTk):
             placeholder_text=self.bi("搜索游戏名称或 AppID …", "Search by game name or AppID …"),
             height=34, corner_radius=8, font=font(13))
         self._games_search_entry.grid(row=0, column=0, sticky="ew")
+        clear_search = ctk.CTkButton(
+            search_frame, text="×", width=34, height=34, corner_radius=8,
+            fg_color="transparent", hover_color=C_NAV_HOVER, text_color=C_BODY_TEXT,
+            command=lambda: self._games_search_var.set(""))
+        clear_search.grid(row=0, column=1, padx=(6, 0))
+
+        filter_options = [
+            ("all", self.bi("全部状态", "All Statuses")),
+            ("favorite", self.bi("仅收藏", "Favorites")),
+            ("path", self.bi("路径异常", "Path Issues")),
+            ("conflict", self.bi("同步冲突", "Sync Conflicts")),
+        ]
+        sort_options = [
+            ("favorite", self.bi("收藏优先", "Favorites First")),
+            ("name", self.bi("按名称", "Name")),
+            ("recent", self.bi("最近备份", "Latest Backup")),
+        ]
+        self._games_filter_codes = {label: code for code, label in filter_options}
+        self._games_sort_codes = {label: code for code, label in sort_options}
+        self._games_filter_var = ctk.StringVar(value=filter_options[0][1])
+        self._games_sort_var = ctk.StringVar(value=sort_options[0][1])
+        ctk.CTkOptionMenu(
+            search_frame, variable=self._games_filter_var,
+            values=[label for _, label in filter_options], width=128, height=34,
+            font=font(12), command=self._on_games_controls_changed).grid(
+                row=0, column=2, padx=(8, 0))
+        ctk.CTkOptionMenu(
+            search_frame, variable=self._games_sort_var,
+            values=[label for _, label in sort_options], width=128, height=34,
+            font=font(12), command=self._on_games_controls_changed).grid(
+                row=0, column=3, padx=(8, 0))
 
         self._games_scroll = ctk.CTkScrollableFrame(
-            frame, height=440, corner_radius=12, fg_color=C_CARD_BG)
+            frame, height=440, corner_radius=8, fg_color=C_CARD_BG)
         self._games_scroll.grid(row=2, column=0, padx=30, pady=4, sticky="nsew")
         frame.grid_rowconfigure(2, weight=1)
         self._game_cards = {}
@@ -11427,15 +11899,15 @@ class SteamSaveManager(ctk.CTk):
         )
         self._games_page_label.grid(row=0, column=0, sticky="w")
         self._games_prev_btn = ctk.CTkButton(
-            pager, text=self.bi("上一页", "Prev"), width=76, height=30,
+            pager, text=f'{UI_ICON["back"]} {self.bi("上一页", "Prev")}', width=76, height=30,
             font=font(12), corner_radius=6,
-            fg_color=BTN_SECONDARY, hover_color=BTN_SECONDARY_H,
+            fg_color=BTN_SECONDARY, hover_color=BTN_SECONDARY_H, text_color=C_BODY_TEXT,
             command=lambda: self._on_games_page_delta(-1))
         self._games_prev_btn.grid(row=0, column=1, padx=(8, 4), sticky="e")
         self._games_next_btn = ctk.CTkButton(
-            pager, text=self.bi("下一页", "Next"), width=76, height=30,
+            pager, text=f'{self.bi("下一页", "Next")} {UI_ICON["next"]}', width=76, height=30,
             font=font(12), corner_radius=6,
-            fg_color=BTN_SECONDARY, hover_color=BTN_SECONDARY_H,
+            fg_color=BTN_SECONDARY, hover_color=BTN_SECONDARY_H, text_color=C_BODY_TEXT,
             command=lambda: self._on_games_page_delta(1))
         self._games_next_btn.grid(row=0, column=2, padx=(4, 0), sticky="e")
 
@@ -11461,6 +11933,7 @@ class SteamSaveManager(ctk.CTk):
                 self._games_next_btn.configure(state="disabled")
             return
         filtered_games = []
+        filter_code = self._games_filter_codes.get(self._games_filter_var.get(), "all")
         for idx, g in enumerate(games):
             haystack = g.get("_search_blob")
             if haystack is None:
@@ -11468,9 +11941,23 @@ class SteamSaveManager(ctk.CTk):
                 g["_search_blob"] = haystack
             if search_text and search_text not in haystack:
                 continue
+            if filter_code == "favorite" and not is_game_favorite(g):
+                continue
+            if filter_code == "path" and get_game_save_paths(g, existing_only=True):
+                continue
+            if filter_code == "conflict" and not get_game_sync_state(self.cfg, g).get("pending_conflict"):
+                continue
             filtered_games.append((idx, g))
 
-        filtered_games.sort(key=lambda item: (0 if is_game_favorite(item[1]) else 1, item[0]))
+        sort_code = self._games_sort_codes.get(self._games_sort_var.get(), "favorite")
+        if sort_code == "name":
+            filtered_games.sort(key=lambda item: str(item[1].get("name", "")).casefold())
+        elif sort_code == "recent":
+            filtered_games.sort(
+                key=lambda item: (self._get_game_backups_cached(item[1]) or [{"timestamp": ""}])[0].get("timestamp", ""),
+                reverse=True)
+        else:
+            filtered_games.sort(key=lambda item: (0 if is_game_favorite(item[1]) else 1, str(item[1].get("name", "")).casefold()))
 
         total_games = len(filtered_games)
         self._games_page, start, end = self._page_range(
@@ -11499,61 +11986,63 @@ class SteamSaveManager(ctk.CTk):
             item = self._game_cards.get(key)
             if item is None:
                 card = ctk.CTkFrame(self._games_scroll,
-                                    fg_color=("#f1f5f9", "#252640"), corner_radius=12)
-                card.grid_columnconfigure(0, weight=1)
+                                    fg_color=("#f8fafc", "#252640"), corner_radius=4)
+                card.grid_columnconfigure(1, weight=1)
+                favorite_btn = ctk.CTkButton(
+                    card, text="", width=34, height=32,
+                    font=font(14, "bold"), corner_radius=6)
+                favorite_btn.grid(row=0, column=0, rowspan=2, padx=(10, 6), pady=8)
                 title = ctk.CTkLabel(card, text="", font=font(14, "bold"),
                                      text_color=C_BODY_TEXT, anchor="w", justify="left",
                                      wraplength=620)
-                title.grid(row=0, column=0, padx=14, pady=(10, 4), sticky="ew")
+                title.grid(row=0, column=1, padx=(0, 8), pady=(8, 1), sticky="ew")
                 self._register_wrap(title, 0.66, 300)
-                favorite_btn = ctk.CTkButton(
-                    card, text="", width=34, height=28,
-                    font=font(13, "bold"), corner_radius=6)
-                favorite_btn.grid(row=0, column=1, padx=14, pady=(8, 4), sticky="e")
                 path_label = ctk.CTkLabel(card, text="", font=font(11),
                                           text_color=C_SUBTLE_TEXT,
                                           wraplength=580, anchor="w",
                                           justify="left")
-                path_label.grid(row=1, column=0, columnspan=2, padx=14, pady=(0, 4), sticky="w")
+                path_label.grid(row=1, column=1, padx=(0, 8), pady=(0, 8), sticky="w")
                 self._register_wrap(path_label, 0.62, 280)
                 self._attach_tooltip(path_label, lambda lbl=path_label: getattr(lbl, "_full_path_text", ""))
-                backup_label = ctk.CTkLabel(card, text="", font=font(11),
-                                            text_color=C_SUBTLE_TEXT)
-                backup_label.grid(row=2, column=0, padx=14, pady=(0, 10), sticky="w")
-                bb = ctk.CTkFrame(card, fg_color="transparent")
-                bb.grid(row=2, column=1, padx=14, pady=(0, 10), sticky="e")
-                detail_btn = ctk.CTkButton(
-                    bb, text=self.bi("详情", "Details"), width=64, height=28,
-                    font=font(12, "bold"), corner_radius=6,
-                    fg_color=BTN_PRIMARY, hover_color=BTN_PRIMARY_H)
-                detail_btn.pack(side="left", padx=2)
+                status_label = ctk.CTkLabel(
+                    card, text="", width=92, font=font(11, "bold"), text_color=C_SUBTLE_TEXT)
+                status_label.grid(row=0, column=2, rowspan=2, padx=6, pady=8)
+                backup_label = ctk.CTkLabel(
+                    card, text="", width=132, font=font(11), text_color=C_SUBTLE_TEXT)
+                backup_label.grid(row=0, column=3, rowspan=2, padx=6, pady=8)
+                copy_btn = ctk.CTkButton(
+                    card, text=UI_ICON["copy"], width=34, height=32, font=font(14), corner_radius=6,
+                    fg_color="transparent", hover_color=C_NAV_HOVER, text_color=C_BODY_TEXT)
+                copy_btn.grid(row=0, column=4, rowspan=2, padx=3, pady=8)
                 backup_btn = self._register_busy_widget(ctk.CTkButton(
-                    bb, text=self.bi("备份", "Backup"), width=56, height=28,
-                    font=font(12), corner_radius=6,
-                    fg_color=BTN_SUCCESS, hover_color=BTN_SUCCESS_H))
-                backup_btn.pack(side="left", padx=2)
-                delete_btn = self._register_busy_widget(ctk.CTkButton(
-                    bb, text=self.bi("删除", "Delete"), width=56, height=28,
-                    font=font(12), corner_radius=6,
-                    fg_color=BTN_DANGER, hover_color=BTN_DANGER_H))
-                delete_btn.pack(side="left", padx=2)
+                    card, text=UI_ICON["refresh"], width=34, height=32,
+                    font=font(14), corner_radius=6,
+                    fg_color=BTN_PRIMARY, hover_color=BTN_PRIMARY_H))
+                backup_btn.grid(row=0, column=5, rowspan=2, padx=3, pady=8)
+                more_btn = self._register_busy_widget(ctk.CTkButton(
+                    card, text=UI_ICON["more"], width=34, height=32,
+                    font=font(16, "bold"), corner_radius=6,
+                    fg_color="transparent", hover_color=C_NAV_HOVER, text_color=C_BODY_TEXT))
+                more_btn.grid(row=0, column=6, rowspan=2, padx=(3, 10), pady=8)
+                self._attach_tooltip(copy_btn, lambda: self.bi("复制存档路径", "Copy save path"))
+                self._attach_tooltip(backup_btn, lambda: self.bi("立即备份", "Back up now"))
+                self._attach_tooltip(more_btn, lambda: self.bi("更多操作", "More actions"))
                 item = {
                     "card": card,
                     "title": title,
                     "path": path_label,
                     "backup": backup_label,
+                    "status": status_label,
                     "favorite_btn": favorite_btn,
-                    "detail_btn": detail_btn,
+                    "copy_btn": copy_btn,
                     "backup_btn": backup_btn,
-                    "delete_btn": delete_btn,
+                    "more_btn": more_btn,
                 }
                 self._game_cards[key] = item
 
             nm = g["name"]
             if g.get("appid"):
-                nm += f"  (AppID: {g['appid']})"
-            if is_game_favorite(g):
-                nm = "★ " + nm
+                nm += f"  ·  AppID {g['appid']}"
             item["title"].configure(text=nm)
 
             save_paths = get_game_save_path_templates(g, existing_only=False)
@@ -11561,10 +12050,20 @@ class SteamSaveManager(ctk.CTk):
             if len(save_paths) > 1:
                 p += self.bi(f"  (+{len(save_paths)-1} 个目录)", f"  (+{len(save_paths)-1} folders)")
             item["path"]._full_path_text = "\n".join(save_paths) if save_paths else p
-            item["path"].configure(text=f"📁 {p}")
+            item["path"].configure(text=p or self.bi("未设置存档路径", "No save path configured"))
 
-            bc = self._get_game_backup_count_cached(g)
-            item["backup"].configure(text=self.bi(f"备份数：{bc}", f"Backups: {bc}"))
+            backups = self._get_game_backups_cached(g)
+            bc = len(backups)
+            latest = self._fmt_ts(backups[0]["timestamp"])[5:16] if backups else self.bi("暂无备份", "No backups")
+            item["backup"].configure(text=self.bi(f"{bc} 个备份 · {latest}", f"{bc} backups · {latest}"))
+            path_ok = bool(get_game_save_paths(g, existing_only=True))
+            conflict = bool(get_game_sync_state(self.cfg, g).get("pending_conflict"))
+            if conflict:
+                item["status"].configure(text=self.bi("同步冲突", "Conflict"), text_color=BTN_DANGER)
+            elif path_ok:
+                item["status"].configure(text=self.bi("路径正常", "Path OK"), text_color=BTN_SUCCESS)
+            else:
+                item["status"].configure(text=self.bi("路径异常", "Path issue"), text_color=BTN_WARN)
 
             favorite_on = is_game_favorite(g)
             item["favorite_btn"].configure(
@@ -11574,20 +12073,24 @@ class SteamSaveManager(ctk.CTk):
                 text_color="#ffffff" if favorite_on else C_BODY_TEXT,
                 command=lambda i=idx: self._toggle_game_favorite(i),
             )
-            item["detail_btn"].configure(command=lambda i=idx: self._show_game_detail(i))
+            full_path = item["path"]._full_path_text
+            item["copy_btn"].configure(command=lambda text=full_path: self._copy_to_clipboard(
+                text, self.bi("完整路径已复制到剪贴板", "Full path copied to clipboard")))
             item["backup_btn"].configure(command=lambda i=idx: self._manual_backup(i))
-            item["delete_btn"].configure(command=lambda i=idx: self._delete_game(i))
+            item["more_btn"].configure(command=lambda button=item["more_btn"], i=idx, text=full_path: self._show_action_menu(
+                button,
+                [
+                    (self.bi("查看详情", "View Details"), lambda: self._show_game_detail(i), False),
+                    (self.bi("编辑信息", "Edit"), lambda: self._edit_game_dialog(i), False),
+                    (self.bi("复制存档路径", "Copy Save Path"), lambda: self._copy_to_clipboard(text), False),
+                    (self.bi("删除游戏", "Delete Game"), lambda: self._delete_game(i), True),
+                ]))
 
             click_handler = lambda _e=None, i=idx: self._show_game_detail(i)
             item["card"].bind("<Button-1>", click_handler)
             item["card"].configure(cursor="hand2")
             item["title"].bind("<Button-1>", click_handler)
             item["path"].bind("<Button-1>", click_handler)
-            item["path"].bind(
-                "<Button-3>",
-                lambda _e=None, text=item["path"]._full_path_text: self._copy_to_clipboard(
-                    text, self.bi("完整路径已复制到剪贴板", "Full path copied to clipboard")),
-            )
             item["backup"].bind("<Button-1>", click_handler)
             item["title"].configure(cursor="hand2")
             item["path"].configure(cursor="hand2")
@@ -11607,6 +12110,7 @@ class SteamSaveManager(ctk.CTk):
                 text=self.bi("没有匹配的游戏", "No matching games")
             )
             self._games_empty_label.pack(pady=40)
+        self._schedule_responsive_update()
 
     def _create_save_paths_editor(self, parent, initial_specs=None, width=420):
         state = {"rows": []}
@@ -11834,24 +12338,29 @@ class SteamSaveManager(ctk.CTk):
         dlg_title = self.bi("编辑游戏", "Edit Game") if is_edit else self.bi("手动添加游戏", "Add Game Manually")
         d = self._create_popup(dlg_title, "700x600")
         d.grid_columnconfigure(0, weight=1)
+        d.grid_rowconfigure(0, weight=1)
+        d.bind("<Escape>", lambda _event: d.destroy(), add="+")
+        body = ctk.CTkScrollableFrame(d, fg_color=C_MAIN_BG, corner_radius=0)
+        body.grid(row=0, column=0, sticky="nsew")
+        body.grid_columnconfigure(0, weight=1)
         r = 0
-        ctk.CTkLabel(d, text=self.bi("游戏名称", "Game Name"), font=font(13)).grid(
+        ctk.CTkLabel(body, text=self.bi("游戏名称", "Game Name"), font=font(13)).grid(
             row=r, column=0, padx=24, pady=(20, 4), sticky="w")
         r += 1
-        ne = ctk.CTkEntry(d, width=620, placeholder_text=self.bi("例如：Elden Ring", "Example: Elden Ring"))
+        ne = ctk.CTkEntry(body, width=620, placeholder_text=self.bi("例如：Elden Ring", "Example: Elden Ring"))
         if is_edit:
             ne.insert(0, g["name"])
         ne.grid(row=r, column=0, padx=24, sticky="ew")
         r += 1
         ae = None
         if not is_edit:
-            ctk.CTkLabel(d, text=self.bi("AppID（可选）", "AppID (Optional)"), font=font(13)).grid(
+            ctk.CTkLabel(body, text=self.bi("AppID（可选）", "AppID (Optional)"), font=font(13)).grid(
                 row=r, column=0, padx=24, pady=(12, 4), sticky="w")
             r += 1
-            ae = ctk.CTkEntry(d, width=200, placeholder_text=self.bi("如 1245620", "For example: 1245620"))
+            ae = ctk.CTkEntry(body, width=200, placeholder_text=self.bi("如 1245620", "For example: 1245620"))
             ae.grid(row=r, column=0, padx=24, sticky="w")
             r += 1
-        ctk.CTkLabel(d, text=self.bi("存档位置", "Save Locations"), font=font(13)).grid(
+        ctk.CTkLabel(body, text=self.bi("存档位置", "Save Locations"), font=font(13)).grid(
             row=r, column=0, padx=24, pady=(12, 4), sticky="w")
         r += 1
         initial_specs = []
@@ -11864,14 +12373,14 @@ class SteamSaveManager(ctk.CTk):
                     _default_save_spec(path, for_storage=True)
                     for path in get_game_save_path_templates(g, existing_only=False)
                 ]
-        editor = self._create_save_paths_editor(d, initial_specs, width=420)
+        editor = self._create_save_paths_editor(body, initial_specs, width=420)
         editor["frame"].grid(row=r, column=0, padx=24, sticky="ew")
         r += 1
-        ctk.CTkLabel(d, text=self.bi("自定义监控程序（可选）", "Custom Monitor Process (Optional)"), font=font(13)).grid(
+        ctk.CTkLabel(body, text=self.bi("自定义监控程序（可选）", "Custom Monitor Process (Optional)"), font=font(13)).grid(
             row=r, column=0, padx=24, pady=(12, 4), sticky="w")
         r += 1
         pe = ctk.CTkEntry(
-            d, width=620,
+            body, width=620,
             placeholder_text=self.bi(
                 "例如：game.exe, game-win64-shipping.exe",
                 "For example: game.exe, game-win64-shipping.exe",
@@ -11882,7 +12391,7 @@ class SteamSaveManager(ctk.CTk):
         pe.grid(row=r, column=0, padx=24, sticky="ew")
         r += 1
         ctk.CTkLabel(
-            d,
+            body,
             text=self.bi("填写进程名即可，支持多个，用逗号或换行分隔", "Enter process names only. Multiple names are supported, separated by commas or new lines."),
             font=font(11),
             text_color=C_SUBTLE_TEXT,
@@ -11928,9 +12437,10 @@ class SteamSaveManager(ctk.CTk):
             self._invalidate_game_backup_count_cache()
             save_config(self.cfg); self._refresh_games_list(); d.destroy()
         btn_text = self.bi("保存", "Save") if is_edit else self.bi("确认添加", "Add Game")
-        ctk.CTkButton(d, text=btn_text, width=140, height=38, font=font(13, "bold"),
-                      corner_radius=10, fg_color=BTN_PRIMARY, hover_color=BTN_PRIMARY_H,
+        ctk.CTkButton(body, text=btn_text, width=140, height=38, font=font(13, "bold"),
+                      corner_radius=8, fg_color=BTN_PRIMARY, hover_color=BTN_PRIMARY_H,
                       command=_sv).grid(row=r, column=0, padx=24, pady=16)
+        d.after(80, lambda: ne.focus_set() if ne.winfo_exists() else None)
 
     def _add_game_dialog(self):
         self._game_form_dialog(idx=None)
@@ -12024,57 +12534,104 @@ class SteamSaveManager(ctk.CTk):
         outer = ctk.CTkFrame(self, fg_color=C_MAIN_BG)
         self._frames["game_detail"] = outer
         outer.grid_columnconfigure(0, weight=1)
-        outer.grid_rowconfigure(0, weight=1)
-        # 使用可滚动容器包裹所有内容，避免小屏幕内容溢出
-        frame = ctk.CTkScrollableFrame(outer, fg_color=C_MAIN_BG, corner_radius=0)
-        frame.grid(row=0, column=0, sticky="nsew")
-        frame.grid_columnconfigure(0, weight=1)
+        outer.grid_rowconfigure(2, weight=1)
 
-        # Row 0: 标题栏（卡片式）
-        hdr = ctk.CTkFrame(frame, fg_color=C_CARD_BG, corner_radius=14)
-        hdr.grid(row=0, column=0, padx=28, pady=(24, 10), sticky="ew")
+        hdr = ctk.CTkFrame(outer, fg_color="transparent")
+        hdr.grid(row=0, column=0, padx=28, pady=(24, 8), sticky="ew")
         hdr.grid_columnconfigure(1, weight=1)
-        ctk.CTkButton(hdr, text="←", width=36, height=36,
+        ctk.CTkButton(hdr, text=UI_ICON["back"], width=36, height=36,
                       font=font(16, "bold"), corner_radius=8,
-                      fg_color=("#e2e8f0", "#2d3055"),
+                      fg_color=BTN_SECONDARY,
                       hover_color=C_NAV_HOVER,
                       text_color=C_BODY_TEXT,
                       command=lambda: self._show_frame("games")).grid(
-            row=0, column=0, padx=(14, 8), pady=14, sticky="w")
+            row=0, column=0, rowspan=2, padx=(0, 10), sticky="w")
         self._detail_title = ctk.CTkLabel(hdr, text="", font=font(20, "bold"))
-        self._detail_title.grid(row=0, column=1, pady=14, sticky="w")
-        self._register_wrap(self._detail_title, 0.62, 300)
+        self._detail_title.grid(row=0, column=1, sticky="w")
+        self._register_wrap(self._detail_title, 0.48, 240)
+        self._detail_appid_label = ctk.CTkLabel(
+            hdr, text="", font=font(11), text_color=C_SUBTLE_TEXT)
+        self._detail_appid_label.grid(row=1, column=1, pady=(2, 0), sticky="w")
         self._detail_status_badge = ctk.CTkLabel(
             hdr, text="", font=font(12, "bold"))
-        self._detail_status_badge.grid(row=0, column=2, padx=(0, 8), pady=14, sticky="e")
+        self._detail_status_badge.grid(row=0, column=2, rowspan=2, padx=(8, 10), sticky="e")
+        detail_actions = ctk.CTkFrame(hdr, fg_color="transparent")
+        detail_actions.grid(row=0, column=3, rowspan=2, sticky="e")
+        self._detail_backup_btn = self._register_busy_widget(ctk.CTkButton(
+            detail_actions, text=f'{UI_ICON["refresh"]}  {self.bi("备份", "Backup")}',
+            width=86, height=36, font=font(12, "bold"), corner_radius=8,
+            fg_color=BTN_PRIMARY, hover_color=BTN_PRIMARY_H))
+        self._detail_backup_btn.pack(side="left", padx=(0, 6))
+        self._detail_sync_btn = self._register_busy_widget(ctk.CTkButton(
+            detail_actions, text=UI_ICON["sync"], width=38, height=36, font=font(15),
+            corner_radius=8, fg_color=BTN_SECONDARY, hover_color=BTN_SECONDARY_H,
+            text_color=C_BODY_TEXT))
+        self._detail_sync_btn.pack(side="left", padx=(0, 6))
+        self._detail_more_btn = self._register_busy_widget(ctk.CTkButton(
+            detail_actions, text=UI_ICON["more"], width=38, height=36, font=font(17, "bold"),
+            corner_radius=8, fg_color="transparent", hover_color=C_NAV_HOVER,
+            text_color=C_BODY_TEXT))
+        self._detail_more_btn.pack(side="left")
+        self._attach_tooltip(self._detail_sync_btn, lambda: self.bi("立即同步", "Sync now"))
+        self._attach_tooltip(self._detail_more_btn, lambda: self.bi("更多操作", "More actions"))
 
-        # Row 1: 统计卡片 (4 列)
-        stats_frame = ctk.CTkFrame(frame, fg_color="transparent")
-        stats_frame.grid(row=1, column=0, padx=28, pady=(0, 8), sticky="ew")
+        detail_tabs = [
+            ("overview", self.bi("概览", "Overview")),
+            ("backups", self.bi("备份", "Backups")),
+            ("automation", self.bi("自动化", "Automation")),
+            ("activity", self.bi("活动", "Activity")),
+        ]
+        self._detail_tab_codes = {label: code for code, label in detail_tabs}
+        self._detail_tab_labels = {code: label for code, label in detail_tabs}
+        self._detail_tab_var = ctk.StringVar(value=detail_tabs[0][1])
+        ctk.CTkSegmentedButton(
+            outer, values=[label for _, label in detail_tabs],
+            variable=self._detail_tab_var, font=font(12),
+            command=self._show_detail_page).grid(
+                row=1, column=0, padx=28, pady=(0, 8), sticky="w")
+
+        host = ctk.CTkFrame(outer, fg_color=C_MAIN_BG, corner_radius=0)
+        host.grid(row=2, column=0, sticky="nsew")
+        host.grid_columnconfigure(0, weight=1)
+        host.grid_rowconfigure(0, weight=1)
+        self._detail_pages = {}
+        for code, _label in detail_tabs:
+            page = ctk.CTkScrollableFrame(host, fg_color=C_MAIN_BG, corner_radius=0)
+            page.grid_columnconfigure(0, weight=1)
+            self._detail_pages[code] = page
+
+        overview = self._detail_pages["overview"]
+        stats_frame = ctk.CTkFrame(overview, fg_color="transparent")
+        stats_frame.grid(row=0, column=0, padx=28, pady=(4, 8), sticky="ew")
         stats_frame.grid_columnconfigure((0, 1, 2, 3), weight=1)
         self._detail_stats = {}
+        self._detail_stat_cards = []
         stat_defs = [
-            ("appid", "🔖 AppID", "—", "#eef2ff", "#2e2b6b", "#6366f1"),
-            ("backups", self.bi("💾 备份数量", "💾 Backups"), "0", "#ecfdf5", "#0c4535", "#10b981"),
-            ("size", self.bi("📦 备份大小", "📦 Backup Size"), "0 B", "#fff7ed", "#5e1e0c", "#f97316"),
-            ("files", self.bi("📄 存档文件", "📄 Save Files"), "—", "#fdf2f8", "#6f0f33", "#ec4899"),
+            ("backups", self.bi("备份数量", "Backups"), "0", BTN_PRIMARY),
+            ("size", self.bi("备份大小", "Backup Size"), "0 B", BTN_SUCCESS),
+            ("files", self.bi("存档文件", "Save Files"), "—", BTN_BLUE),
+            ("last", self.bi("最近备份", "Last Backup"), "—", BTN_WARN),
         ]
-        for col, (key, title, default, lbg, dbg, accent) in enumerate(stat_defs):
-            sc = ctk.CTkFrame(stats_frame, fg_color=(lbg, dbg), corner_radius=12)
+        for col, (key, title, default, accent) in enumerate(stat_defs):
+            sc = ctk.CTkFrame(
+                stats_frame, fg_color=C_CARD_BG, corner_radius=8,
+                border_width=1, border_color=C_SIDEBAR_SEP)
             sc.grid(row=0, column=col, padx=4, pady=4, sticky="nsew")
             ctk.CTkLabel(sc, text=title, font=font(11),
                          text_color=C_SUBTLE_TEXT).grid(
-                row=0, column=0, padx=14, pady=(14, 0), sticky="w")
+                row=0, column=0, padx=14, pady=(12, 0), sticky="w")
             vl = ctk.CTkLabel(sc, text=default, font=font(18, "bold"),
                               text_color=(accent, accent))
-            vl.grid(row=1, column=0, padx=14, pady=(4, 14), sticky="w")
+            vl.grid(row=1, column=0, padx=14, pady=(4, 12), sticky="w")
             self._detail_stats[key] = vl
+            self._detail_stat_cards.append(sc)
 
-        # Row 2: 存档路径卡片
-        path_card = ctk.CTkFrame(frame, fg_color=C_CARD_BG, corner_radius=12)
-        path_card.grid(row=2, column=0, padx=28, pady=(0, 8), sticky="ew")
+        path_card = ctk.CTkFrame(
+            overview, fg_color=C_CARD_BG, corner_radius=8,
+            border_width=1, border_color=C_SIDEBAR_SEP)
+        path_card.grid(row=1, column=0, padx=28, pady=(0, 16), sticky="ew")
         path_card.grid_columnconfigure(1, weight=1)
-        ctk.CTkLabel(path_card, text=self.bi("📁 存档路径", "📁 Save Path"), font=font(12, "bold"),
+        ctk.CTkLabel(path_card, text=self.bi("存档路径", "Save Path"), font=font(12, "bold"),
                      text_color=C_SUBTLE_TEXT).grid(
             row=0, column=0, padx=(16, 8), pady=14, sticky="w")
         self._detail_path = ctk.CTkLabel(
@@ -12083,26 +12640,104 @@ class SteamSaveManager(ctk.CTk):
         self._detail_path.grid(row=0, column=1, padx=(0, 8), pady=14, sticky="w")
         self._register_wrap(self._detail_path, 0.58, 280)
         self._attach_tooltip(self._detail_path, lambda: getattr(self._detail_path, "_full_path_text", ""))
-        self._detail_path.bind(
-            "<Button-3>",
-            lambda _e=None: self._copy_to_clipboard(
+        self._detail_copy_btn = ctk.CTkButton(
+            path_card, text=UI_ICON["copy"], width=34, height=28, font=font(14),
+            corner_radius=6, fg_color="transparent", hover_color=C_NAV_HOVER,
+            text_color=C_BODY_TEXT,
+            command=lambda: self._copy_to_clipboard(
                 getattr(self._detail_path, "_full_path_text", ""),
-                self.bi("完整路径已复制到剪贴板", "Full path copied to clipboard"),
-            ),
-            add="+",
-        )
+                self.bi("完整路径已复制到剪贴板", "Full path copied to clipboard")))
+        self._detail_copy_btn.grid(row=0, column=2, padx=(0, 4), pady=14)
         self._detail_open_btn = ctk.CTkButton(
             path_card, text=self.bi("打开", "Open"), width=56, height=28, font=font(11),
-            corner_radius=6, fg_color=("#64748b", "#64748b"),
-            hover_color=("#475569", "#475569"))
-        self._detail_open_btn.grid(row=0, column=2, padx=(0, 14), pady=14)
+            corner_radius=6, fg_color=BTN_SECONDARY, hover_color=BTN_SECONDARY_H,
+            text_color=C_BODY_TEXT)
+        self._detail_open_btn.grid(row=0, column=3, padx=(0, 14), pady=14)
+        self._attach_tooltip(self._detail_copy_btn, lambda: self.bi("复制存档路径", "Copy save path"))
 
-        # Row 3: 进程状态 & 同步监控卡片
-        proc_card = ctk.CTkFrame(frame, fg_color=C_CARD_BG, corner_radius=12)
-        proc_card.grid(row=3, column=0, padx=28, pady=(0, 8), sticky="ew")
+        backups_page = self._detail_pages["backups"]
+        backup_header = ctk.CTkFrame(backups_page, fg_color="transparent")
+        backup_header.grid(row=0, column=0, padx=28, pady=(8, 8), sticky="ew")
+        backup_header.grid_columnconfigure(0, weight=1)
+        self._detail_bk_count_label = ctk.CTkLabel(
+            backup_header, text="", font=font(13, "bold"), text_color=C_BODY_TEXT)
+        self._detail_bk_count_label.grid(row=0, column=0, sticky="w")
+        ctk.CTkButton(
+            backup_header, text=self.bi("完整历史", "Full History"), width=104, height=32,
+            font=font(12), corner_radius=8, fg_color=BTN_SECONDARY,
+            hover_color=BTN_SECONDARY_H, text_color=C_BODY_TEXT,
+            command=lambda: self._open_backup_for_game(
+                self.cfg["games"][self._detail_idx]["name"])).grid(
+                    row=0, column=1, sticky="e")
+        self._detail_backup_rows_host = ctk.CTkFrame(backups_page, fg_color="transparent")
+        self._detail_backup_rows_host.grid(row=1, column=0, padx=28, pady=(0, 16), sticky="ew")
+        self._detail_backup_rows_host.grid_columnconfigure(0, weight=1)
+
+        automation = self._detail_pages["automation"]
+        automation_card = ctk.CTkFrame(
+            automation, fg_color=C_CARD_BG, corner_radius=8,
+            border_width=1, border_color=C_SIDEBAR_SEP)
+        automation_card.grid(row=0, column=0, padx=28, pady=(8, 16), sticky="ew")
+        automation_card.grid_columnconfigure(0, weight=1)
+        self._detail_automation_hint = ctk.CTkLabel(
+            automation_card, text="", font=font(11), text_color=C_SUBTLE_TEXT,
+            anchor="w", justify="left")
+        self._detail_automation_hint.grid(row=0, column=0, padx=16, pady=(14, 8), sticky="ew")
+        ctk.CTkButton(
+            automation_card, text=self.bi("打开全局设置", "Open Global Settings"),
+            width=126, height=30, font=font(11), corner_radius=6,
+            fg_color=BTN_SECONDARY, hover_color=BTN_SECONDARY_H, text_color=C_BODY_TEXT,
+            command=lambda: self._open_settings_page("backup")).grid(
+                row=0, column=1, padx=(8, 16), pady=(12, 8), sticky="e")
+
+        def _setting_switch(row, title, description, variable, command):
+            item = ctk.CTkFrame(automation_card, fg_color="transparent")
+            item.grid(row=row, column=0, columnspan=2, padx=16, pady=4, sticky="ew")
+            item.grid_columnconfigure(0, weight=1)
+            ctk.CTkLabel(item, text=title, font=font(12, "bold"), anchor="w").grid(
+                row=0, column=0, sticky="w")
+            ctk.CTkLabel(item, text=description, font=font(11), text_color=C_SUBTLE_TEXT,
+                         anchor="w", justify="left").grid(row=1, column=0, sticky="w")
+            switch = ctk.CTkSwitch(
+                item, text="", width=42, variable=variable,
+                onvalue="on", offvalue="off", command=command)
+            switch.grid(row=0, column=1, rowspan=2, padx=(12, 0), sticky="e")
+            return switch
+
+        self._detail_auto_var = ctk.StringVar(value="on")
+        self._detail_auto_switch = _setting_switch(
+            1, self.bi("定时备份", "Scheduled Backup"),
+            self.bi("按全局间隔为此游戏创建备份", "Back up this game at the global interval"),
+            self._detail_auto_var, self._toggle_game_auto_backup)
+        self._detail_watch_var = ctk.StringVar(value="on")
+        self._detail_watch_switch = _setting_switch(
+            2, self.bi("文件变动备份", "File-change Backup"),
+            self.bi("检测到存档变化后创建备份", "Back up after save files change"),
+            self._detail_watch_var, self._toggle_game_watch_backup)
+        self._detail_exit_backup_var = ctk.StringVar(value="off")
+        self._detail_exit_backup_switch = _setting_switch(
+            3, self.bi("退出后备份", "Backup After Exit"),
+            self.bi("游戏进程结束后创建一次备份", "Create a backup when the game exits"),
+            self._detail_exit_backup_var, self._toggle_game_exit_backup)
+        self._detail_sync_var = ctk.StringVar(value="on")
+        self._detail_sync_switch = _setting_switch(
+            4, self.bi("云同步", "Cloud Sync"),
+            self.bi("在同步全部和智能云存档中包含此游戏", "Include this game in Sync All and Smart Cloud Save"),
+            self._detail_sync_var, self._toggle_game_sync_enabled)
+        self._detail_favorite_var = ctk.StringVar(value="off")
+        self._detail_favorite_switch = _setting_switch(
+            5, self.bi("收藏", "Favorite"),
+            self.bi("在游戏列表中优先显示", "Show first in the Games list"),
+            self._detail_favorite_var, self._toggle_game_favorite_from_detail)
+        ctk.CTkFrame(automation_card, height=8, fg_color="transparent").grid(row=6, column=0)
+
+        activity = self._detail_pages["activity"]
+        proc_card = ctk.CTkFrame(
+            activity, fg_color=C_CARD_BG, corner_radius=8,
+            border_width=1, border_color=C_SIDEBAR_SEP)
+        proc_card.grid(row=0, column=0, padx=28, pady=(8, 16), sticky="ew")
         proc_card.grid_columnconfigure(1, weight=1)
-        # 进程状态行
-        ctk.CTkLabel(proc_card, text=self.bi("🔍 进程状态", "🔍 Process Status"), font=font(12, "bold"),
+        ctk.CTkLabel(proc_card, text=self.bi("进程状态", "Process Status"), font=font(12, "bold"),
                      text_color=C_SUBTLE_TEXT).grid(
             row=0, column=0, padx=(16, 8), pady=(14, 4), sticky="w")
         self._detail_proc_status = ctk.CTkLabel(
@@ -12117,8 +12752,7 @@ class SteamSaveManager(ctk.CTk):
                       hover_color=("#475569", "#475569"),
                       command=self._show_process_diagnose).grid(
             row=0, column=3, padx=(0, 14), pady=(14, 4))
-        # 同步监控行
-        ctk.CTkLabel(proc_card, text=self.bi("📡 同步监控", "📡 Sync Monitor"), font=font(12, "bold"),
+        ctk.CTkLabel(proc_card, text=self.bi("同步监控", "Sync Monitor"), font=font(12, "bold"),
                      text_color=C_SUBTLE_TEXT).grid(
             row=1, column=0, padx=(16, 8), pady=(4, 4), sticky="w")
         self._detail_sync_monitor_status = ctk.CTkLabel(
@@ -12140,92 +12774,68 @@ class SteamSaveManager(ctk.CTk):
         self._detail_sync_recent.grid(row=2, column=0, columnspan=4,
                                        padx=16, pady=(0, 14), sticky="w")
         self._register_wrap(self._detail_sync_recent, 0.72, 320)
+        self._show_detail_page("overview")
 
-        # Row 4: 快捷操作卡片
-        action_card = ctk.CTkFrame(frame, fg_color=C_CARD_BG, corner_radius=12)
-        action_card.grid(row=4, column=0, padx=28, pady=(0, 10), sticky="ew")
-        action_card.grid_columnconfigure(0, weight=1)
-        ctk.CTkLabel(action_card, text=self.bi("⚡ 快捷操作", "⚡ Quick Actions"), font=font(12, "bold"),
-                     text_color=C_SUBTLE_TEXT).grid(
-            row=0, column=0, padx=16, pady=(12, 6), sticky="w")
-        self._detail_btns = ctk.CTkFrame(action_card, fg_color="transparent")
-        self._detail_btns.grid(row=1, column=0, padx=12, pady=(0, 14), sticky="ew")
-        self._detail_btns.grid_columnconfigure((0, 1, 2, 3, 4), weight=1)
+    def _show_detail_page(self, value):
+        code = self._detail_tab_codes.get(value, value if value in self._detail_pages else "overview")
+        for page in self._detail_pages.values():
+            page.grid_remove()
+        page = self._detail_pages.get(code)
+        if page is not None:
+            page.grid(row=0, column=0, sticky="nsew")
+        if code in self._detail_tab_labels:
+            self._detail_tab_var.set(self._detail_tab_labels[code])
 
-        # Row 5: 单独设置卡片
-        settings_card = ctk.CTkFrame(frame, fg_color=C_CARD_BG, corner_radius=12)
-        settings_card.grid(row=5, column=0, padx=28, pady=(0, 8), sticky="ew")
-        settings_card.grid_columnconfigure(1, weight=1)
-        ctk.CTkLabel(settings_card, text=self.bi("🔧 游戏设置", "🔧 Game Settings"), font=font(12, "bold"),
-                     text_color=C_SUBTLE_TEXT).grid(
-            row=0, column=0, padx=(16, 8), pady=14, sticky="w")
-        self._detail_auto_var = ctk.StringVar(value="on")
-        self._detail_auto_switch = ctk.CTkSwitch(
-            settings_card, text=self.bi("定时自动备份此游戏", "Scheduled backup for this game"),
-            variable=self._detail_auto_var,
-            onvalue="on", offvalue="off", font=font(12),
-            command=self._toggle_game_auto_backup)
-        self._detail_auto_switch.grid(row=0, column=1, padx=(0, 16), pady=14, sticky="w")
-        self._detail_watch_var = ctk.StringVar(value="on")
-        self._detail_watch_switch = ctk.CTkSwitch(
-            settings_card, text=self.bi("文件变动时自动备份此游戏", "File-change backup for this game"),
-            variable=self._detail_watch_var,
-            onvalue="on", offvalue="off", font=font(12),
-            command=self._toggle_game_watch_backup)
-        self._detail_watch_switch.grid(row=1, column=1, padx=(0, 16), pady=(0, 14), sticky="w")
-        self._detail_exit_backup_var = ctk.StringVar(value="off")
-        self._detail_exit_backup_switch = ctk.CTkSwitch(
-            settings_card, text=self.bi("游戏退出后自动备份", "Back up automatically after game exit"),
-            variable=self._detail_exit_backup_var,
-            onvalue="on", offvalue="off", font=font(12),
-            command=self._toggle_game_exit_backup)
-        self._detail_exit_backup_switch.grid(row=2, column=1, padx=(0, 16), pady=(0, 14), sticky="w")
-        self._detail_sync_var = ctk.StringVar(value="on")
-        self._detail_sync_switch = ctk.CTkSwitch(
-            settings_card, text=self.bi("存档自动同步此游戏（智能云存档 / 同步全部时包含此游戏）",
-                                        "Sync saves for this game (included in Smart Cloud Save and Sync All)"),
-            variable=self._detail_sync_var,
-            onvalue="on", offvalue="off", font=font(12),
-            command=self._toggle_game_sync_enabled)
-        self._detail_sync_switch.grid(row=3, column=1, padx=(0, 16), pady=(0, 14), sticky="w")
-        self._detail_favorite_var = ctk.StringVar(value="off")
-        self._detail_favorite_switch = ctk.CTkSwitch(
-            settings_card, text=self.bi("收藏此游戏（在游戏列表中优先显示）",
-                                        "Favorite this game (show it first in the Games list)"),
-            variable=self._detail_favorite_var,
-            onvalue="on", offvalue="off", font=font(12),
-            command=self._toggle_game_favorite_from_detail)
-        self._detail_favorite_switch.grid(row=4, column=1, padx=(0, 16), pady=(0, 14), sticky="w")
-
-        # Row 6: 备份历史按钮卡片
-        bk_card = ctk.CTkFrame(frame, fg_color=C_CARD_BG, corner_radius=12)
-        bk_card.grid(row=6, column=0, padx=28, pady=(0, 20), sticky="ew")
-        bk_card.grid_columnconfigure(1, weight=1)
-        ctk.CTkLabel(bk_card, text=self.bi("📋 备份历史", "📋 Backup History"), font=font(13, "bold"),
-                     text_color=C_BODY_TEXT).grid(
-            row=0, column=0, padx=(16, 8), pady=14, sticky="w")
-        self._detail_bk_count_label = ctk.CTkLabel(
-            bk_card, text=self.bi("0 条记录", "0 records"), font=font(12), text_color=C_SUBTLE_TEXT)
-        self._detail_bk_count_label.grid(row=0, column=1, pady=14, sticky="w")
-        ctk.CTkButton(bk_card, text=self.bi("查看全部", "View All"), width=110, height=32,
-                      font=font(12, "bold"), corner_radius=8,
-                      fg_color=BTN_PRIMARY, hover_color=BTN_PRIMARY_H,
-                      command=self._show_backup_history).grid(
-            row=0, column=2, padx=(0, 14), pady=14, sticky="e")
+    def _render_detail_backup_rows(self, game: dict, backups: list[dict]):
+        for child in self._detail_backup_rows_host.winfo_children():
+            child.destroy()
+        if not backups:
+            ctk.CTkLabel(
+                self._detail_backup_rows_host,
+                text=self.bi("暂无备份记录", "No backups yet"),
+                font=font(13), text_color=C_SUBTLE_TEXT).grid(
+                    row=0, column=0, pady=36)
+            return
+        for row_index, backup in enumerate(backups[:12]):
+            backup_ref = dict(backup)
+            backup_ref["game"] = game.get("name", "")
+            backup_ref["_game_ref"] = game
+            backup_ref["save_paths"] = get_game_save_paths(game, existing_only=False)
+            row = ctk.CTkFrame(
+                self._detail_backup_rows_host,
+                fg_color=("#f8fafc", "#252640"), corner_radius=4)
+            row.grid(row=row_index, column=0, pady=2, sticky="ew")
+            row.grid_columnconfigure(0, weight=1)
+            ctk.CTkLabel(
+                row, text=self._fmt_ts(backup.get("timestamp", "")),
+                font=font(12, "bold"), text_color=C_BODY_TEXT).grid(
+                    row=0, column=0, padx=12, pady=(7, 0), sticky="w")
+            note = localize_backup_note(backup.get("note", ""), cfg_language(self.cfg))
+            info = fmt_size(backup.get("size", 0)) + (f"  ·  {note}" if note else "")
+            ctk.CTkLabel(
+                row, text=info, font=font(11), text_color=C_SUBTLE_TEXT).grid(
+                    row=1, column=0, padx=12, pady=(0, 7), sticky="w")
+            self._register_busy_widget(ctk.CTkButton(
+                row, text=self.bi("还原", "Restore"), width=70, height=30,
+                font=font(11, "bold"), corner_radius=6,
+                fg_color=BTN_PRIMARY, hover_color=BTN_PRIMARY_H,
+                command=lambda bp=backup_ref: self._restore(bp))).grid(
+                    row=0, column=1, rowspan=2, padx=10, pady=7)
 
     def _show_game_detail(self, idx):
+        previous_idx = getattr(self, "_detail_idx", None)
         self._detail_idx = idx
         self._current_frame = "game_detail"
         g = self.cfg["games"][idx]
-        self._detail_title.configure(text=f"🎮 {g['name']}")
+        self._detail_title.configure(text=g["name"])
+        self._detail_appid_label.configure(
+            text=f"AppID {g.get('appid')}" if g.get("appid") else self.bi("未设置 AppID", "No AppID"))
 
         backups = self._get_game_backups_cached(g)
         total_size = sum(b["size"] for b in backups)
         detail_metrics = self._get_game_detail_metrics_cached(g)
 
         # 统计卡片
-        self._detail_stats["appid"].configure(
-            text=g.get("appid", "") or self.bi("未设置", "Not set"))
         self._detail_stats["backups"].configure(text=str(len(backups)))
         self._detail_stats["size"].configure(text=fmt_size(total_size))
         save_paths = detail_metrics.get("display_paths", []) or detail_metrics.get("save_paths", [])
@@ -12234,14 +12844,20 @@ class SteamSaveManager(ctk.CTk):
         file_count = int(detail_metrics.get("file_count", 0))
         self._detail_stats["files"].configure(
             text=self.bi(f"{file_count} 个", f"{file_count}") if path_ok else "—")
+        self._detail_stats["last"].configure(
+            text=self._fmt_ts(backups[0]["timestamp"])[5:16] if backups else "—")
 
         # 标题栏状态徽章
-        if path_ok:
+        has_conflict = bool(get_game_sync_state(self.cfg, g).get("pending_conflict"))
+        if has_conflict:
             self._detail_status_badge.configure(
-                text=self.bi("● 存档正常", "● Save OK"), text_color=("#16a34a", "#4ade80"))
+                text=self.bi("同步冲突", "Sync Conflict"), text_color=BTN_DANGER)
+        elif path_ok:
+            self._detail_status_badge.configure(
+                text=self.bi("存档正常", "Save OK"), text_color=BTN_SUCCESS)
         else:
             self._detail_status_badge.configure(
-                text=self.bi("● 路径异常", "● Path Error"), text_color=("#dc2626", "#fca5a5"))
+                text=self.bi("路径异常", "Path Issue"), text_color=BTN_DANGER)
 
         # 路径
         primary_path = save_paths[0] if save_paths else g.get("save_path", "")
@@ -12257,26 +12873,17 @@ class SteamSaveManager(ctk.CTk):
         self._detail_open_btn.configure(
             command=lambda: self._open_save_folder(idx))
 
-        # 操作按钮 (grid 等宽排列)
-        for w in self._detail_btns.winfo_children(): w.destroy()
-        actions = [
-            (self.bi("💾 立即备份", "💾 Back Up Now"), BTN_SUCCESS, BTN_SUCCESS_H,
-             lambda: self._backup_from_detail(idx)),
-            (self.bi("🔄 同步存档", "🔄 Sync Saves"), BTN_BLUE, BTN_BLUE_H,
-             lambda: self._manual_sync_one(idx)),
-            (self.bi("📥 导入存档", "📥 Import Save"), BTN_WARN, BTN_WARN_H,
-             lambda: self._import_save(idx)),
-            (self.bi("📝 编辑信息", "📝 Edit"), BTN_PRIMARY, BTN_PRIMARY_H,
-             lambda: self._edit_game_dialog(idx)),
-            (self.bi("❌ 删除游戏", "❌ Delete Game"), BTN_DANGER, BTN_DANGER_H,
-             lambda: self._delete_game_from_detail(idx)),
-        ]
-        for i, (txt, clr, hclr, cmd) in enumerate(actions):
-            self._register_busy_widget(ctk.CTkButton(
-                self._detail_btns, text=txt, height=36,
-                font=font(12, "bold"), corner_radius=8,
-                fg_color=clr, hover_color=hclr,
-                command=cmd)).grid(row=0, column=i, padx=3, sticky="ew")
+        self._detail_backup_btn.configure(command=lambda: self._backup_from_detail(idx))
+        self._detail_sync_btn.configure(command=lambda: self._manual_sync_one(idx))
+        self._detail_more_btn.configure(command=lambda button=self._detail_more_btn, i=idx: self._show_action_menu(
+            button,
+            [
+                (self.bi("导入存档", "Import Save"), lambda: self._import_save(i), False),
+                (self.bi("编辑信息", "Edit"), lambda: self._edit_game_dialog(i), False),
+                (self.bi("复制存档路径", "Copy Save Path"), lambda: self._copy_to_clipboard(
+                    getattr(self._detail_path, "_full_path_text", "")), False),
+                (self.bi("删除游戏", "Delete Game"), lambda: self._delete_game_from_detail(i), True),
+            ]))
 
         # 单独设置：自动备份开关
         auto_on = is_game_scheduled_backup_enabled(g)
@@ -12285,11 +12892,31 @@ class SteamSaveManager(ctk.CTk):
         self._detail_exit_backup_var.set("on" if is_game_exit_backup_enabled(g) else "off")
         self._detail_sync_var.set("on" if is_game_sync_enabled(g) else "off")
         self._detail_favorite_var.set("on" if is_game_favorite(g) else "off")
+        auto_global = bool(self.cfg.get("auto_backup_enabled"))
+        watch_global = bool(self.cfg.get("watch_enabled")) and HAS_WATCHDOG
+        sync_global = bool(self.cfg.get("sync_enabled"))
+        self._detail_auto_switch.configure(state="normal" if auto_global else "disabled")
+        self._detail_watch_switch.configure(state="normal" if watch_global else "disabled")
+        self._detail_sync_switch.configure(state="normal" if sync_global else "disabled")
+        self._detail_sync_btn.configure(state="normal" if sync_global and is_game_sync_enabled(g) else "disabled")
+        disabled_features = []
+        if not auto_global:
+            disabled_features.append(self.bi("定时备份", "scheduled backup"))
+        if not watch_global:
+            disabled_features.append(self.bi("文件监控", "file watch"))
+        if not sync_global:
+            disabled_features.append(self.bi("云同步", "cloud sync"))
+        self._detail_automation_hint.configure(
+            text=(
+                self.bi("全局未启用：", "Disabled globally: ") + self.bi("、", ", ").join(disabled_features)
+                if disabled_features else self.bi("所有全局自动化服务均已启用", "All global automation services are enabled")
+            ),
+            text_color=BTN_WARN if disabled_features else BTN_SUCCESS)
 
-        # 备份历史：只更新计数标签
         self._detail_bk_count_label.configure(
             text=self.bi(f"{len(backups)} 条记录  ·  {fmt_size(total_size)}",
                          f"{len(backups)} records  ·  {fmt_size(total_size)}") if backups else self.bi("暂无备份", "No backups"))
+        self._render_detail_backup_rows(g, backups)
 
         self._ensure_game_monitor()
 
@@ -12300,6 +12927,11 @@ class SteamSaveManager(ctk.CTk):
         for f in self._frames.values(): f.grid_forget()
         self._frames["game_detail"].grid(row=0, column=1, sticky="nsew")
         self._highlight_nav("games")
+        if previous_idx != idx:
+            self._show_detail_page("overview")
+        else:
+            self._show_detail_page(self._detail_tab_codes.get(self._detail_tab_var.get(), "overview"))
+        self._schedule_responsive_update()
         self._start_detail_refresh()
 
     def _show_backup_history(self):
@@ -13342,20 +13974,72 @@ class SteamSaveManager(ctk.CTk):
 
         hdr = ctk.CTkFrame(frame, fg_color="transparent")
         hdr.grid(row=0, column=0, padx=32, pady=(28, 6), sticky="ew")
-        hdr.grid_columnconfigure(1, weight=1)
-        ctk.CTkLabel(hdr, text=self.t("backup_title"), font=font(20, "bold")).grid(
+        hdr.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(hdr, text=self.bi("备份记录", "Backups"), font=font(20, "bold")).grid(
             row=0, column=0, sticky="w")
+
+        controls = ctk.CTkFrame(frame, fg_color="transparent")
+        controls.grid(row=1, column=0, padx=32, pady=(4, 4), sticky="ew")
+        controls.grid_columnconfigure(0, weight=1)
+        self._backup_search_var = ctk.StringVar()
+        self._backup_search_var.trace_add("write", lambda *_args: self._on_backup_filter_changed())
+        ctk.CTkEntry(
+            controls, textvariable=self._backup_search_var,
+            placeholder_text=self.bi("搜索游戏名称或备份说明 …", "Search games or backup notes …"),
+            height=34, corner_radius=8, font=font(13)).grid(row=0, column=0, sticky="ew")
+        ctk.CTkButton(
+            controls, text="×", width=34, height=34, corner_radius=8,
+            fg_color="transparent", hover_color=C_NAV_HOVER, text_color=C_BODY_TEXT,
+            command=lambda: self._backup_search_var.set("")).grid(row=0, column=1, padx=(6, 0))
+
         self._bk_var = ctk.StringVar(value=self.t("backup_all_games"))
         self._bk_filter = ctk.CTkOptionMenu(
-            hdr, variable=self._bk_var, values=[self.t("backup_all_games")],
-            command=lambda _: self._on_backup_filter_changed(), width=200,
+            controls, variable=self._bk_var, values=[self.t("backup_all_games")],
+            command=lambda _: self._on_backup_filter_changed(), width=176, height=34,
             font=font(12))
-        self._bk_filter.grid(row=0, column=1, sticky="e")
+        self._bk_filter.grid(row=1, column=0, pady=(8, 0), sticky="w")
+        source_options = [
+            ("all", self.bi("全部来源", "All Sources")),
+            ("manual", self.bi("手动备份", "Manual")),
+            ("automatic", self.bi("自动备份", "Automatic")),
+            ("sync", self.bi("同步备份", "Sync")),
+        ]
+        date_options = [
+            ("all", self.bi("全部时间", "Any Time")),
+            ("7", self.bi("最近 7 天", "Last 7 Days")),
+            ("30", self.bi("最近 30 天", "Last 30 Days")),
+        ]
+        sort_options = [
+            ("new", self.bi("最新优先", "Newest")),
+            ("old", self.bi("最早优先", "Oldest")),
+            ("large", self.bi("体积最大", "Largest")),
+        ]
+        self._backup_source_codes = {label: code for code, label in source_options}
+        self._backup_date_codes = {label: code for code, label in date_options}
+        self._backup_sort_codes = {label: code for code, label in sort_options}
+        self._backup_source_var = ctk.StringVar(value=source_options[0][1])
+        self._backup_date_var = ctk.StringVar(value=date_options[0][1])
+        self._backup_sort_var = ctk.StringVar(value=sort_options[0][1])
+        ctk.CTkOptionMenu(
+            controls, variable=self._backup_source_var,
+            values=[label for _, label in source_options], width=132, height=34,
+            font=font(12), command=lambda _: self._on_backup_filter_changed()).grid(
+                row=1, column=0, padx=(184, 0), pady=(8, 0), sticky="w")
+        ctk.CTkOptionMenu(
+            controls, variable=self._backup_date_var,
+            values=[label for _, label in date_options], width=132, height=34,
+            font=font(12), command=lambda _: self._on_backup_filter_changed()).grid(
+                row=1, column=0, padx=(324, 0), pady=(8, 0), sticky="w")
+        ctk.CTkOptionMenu(
+            controls, variable=self._backup_sort_var,
+            values=[label for _, label in sort_options], width=132, height=34,
+            font=font(12), command=lambda _: self._on_backup_filter_changed()).grid(
+                row=1, column=0, padx=(464, 0), pady=(8, 0), sticky="w")
 
         self._bk_scroll = ctk.CTkScrollableFrame(
-            frame, height=440, corner_radius=12, fg_color=C_CARD_BG)
-        self._bk_scroll.grid(row=1, column=0, padx=30, pady=10, sticky="nsew")
-        frame.grid_rowconfigure(1, weight=1)
+            frame, height=440, corner_radius=8, fg_color=C_CARD_BG)
+        self._bk_scroll.grid(row=2, column=0, padx=30, pady=6, sticky="nsew")
+        frame.grid_rowconfigure(2, weight=1)
         self._backup_rows = {}
         self._backup_empty_label = ctk.CTkLabel(
             self._bk_scroll,
@@ -13364,22 +14048,22 @@ class SteamSaveManager(ctk.CTk):
             font=font(13),
         )
         pager = ctk.CTkFrame(frame, fg_color="transparent")
-        pager.grid(row=2, column=0, padx=30, pady=(0, 14), sticky="ew")
+        pager.grid(row=3, column=0, padx=30, pady=(0, 14), sticky="ew")
         pager.grid_columnconfigure(0, weight=1)
         self._backup_page_label = ctk.CTkLabel(
             pager, text="", text_color=C_SUBTLE_TEXT, font=font(12)
         )
         self._backup_page_label.grid(row=0, column=0, sticky="w")
         self._backup_prev_btn = ctk.CTkButton(
-            pager, text=self.bi("上一页", "Prev"), width=76, height=30,
+            pager, text=f'{UI_ICON["back"]} {self.bi("上一页", "Prev")}', width=76, height=30,
             font=font(12), corner_radius=6,
-            fg_color=BTN_SECONDARY, hover_color=BTN_SECONDARY_H,
+            fg_color=BTN_SECONDARY, hover_color=BTN_SECONDARY_H, text_color=C_BODY_TEXT,
             command=lambda: self._on_backup_page_delta(-1))
         self._backup_prev_btn.grid(row=0, column=1, padx=(8, 4), sticky="e")
         self._backup_next_btn = ctk.CTkButton(
-            pager, text=self.bi("下一页", "Next"), width=76, height=30,
+            pager, text=f'{self.bi("下一页", "Next")} {UI_ICON["next"]}', width=76, height=30,
             font=font(12), corner_radius=6,
-            fg_color=BTN_SECONDARY, hover_color=BTN_SECONDARY_H,
+            fg_color=BTN_SECONDARY, hover_color=BTN_SECONDARY_H, text_color=C_BODY_TEXT,
             command=lambda: self._on_backup_page_delta(1))
         self._backup_next_btn.grid(row=0, column=2, padx=(4, 0), sticky="e")
 
@@ -13390,21 +14074,42 @@ class SteamSaveManager(ctk.CTk):
 
         sel = self._bk_var.get()
         targets = games if sel == all_games_label else [g for g in games if g["name"] == sel]
-        total_backups = sum(self._get_game_backup_count_cached(g) for g in targets)
-        self._backup_page, start, end = self._page_range(
-            self._backup_page, total_backups, self._backup_page_size
-        )
-        total_pages = max(1, (total_backups + self._backup_page_size - 1) // self._backup_page_size)
         all_b = []
         for item in self._backup_rows.values():
             item["card"].pack_forget()
-        if total_backups:
-            for g in targets:
-                for b in self._get_game_backups_cached(g):
-                    b["game"] = g["name"]
-                    b["_game_ref"] = g
-                    all_b.append(b)
-            all_b.sort(key=lambda x: x["timestamp"], reverse=True)
+        search_text = self._backup_search_var.get().strip().casefold()
+        source_code = self._backup_source_codes.get(self._backup_source_var.get(), "all")
+        date_code = self._backup_date_codes.get(self._backup_date_var.get(), "all")
+        cutoff = None
+        if date_code in {"7", "30"}:
+            cutoff = datetime.datetime.now() - datetime.timedelta(days=int(date_code))
+        for g in targets:
+            for backup in self._get_game_backups_cached(g):
+                b = dict(backup)
+                b["game"] = g["name"]
+                b["_game_ref"] = g
+                note = localize_backup_note(b.get("note", ""), cfg_language(self.cfg))
+                if search_text and search_text not in f"{g['name']} {note}".casefold():
+                    continue
+                if source_code != "all" and self._backup_source_code(b.get("note", "")) != source_code:
+                    continue
+                if cutoff is not None:
+                    try:
+                        backup_time = datetime.datetime.strptime(str(b.get("timestamp", ""))[:15], "%Y%m%d_%H%M%S")
+                    except ValueError:
+                        backup_time = datetime.datetime.min
+                    if backup_time < cutoff:
+                        continue
+                all_b.append(b)
+        sort_code = self._backup_sort_codes.get(self._backup_sort_var.get(), "new")
+        if sort_code == "large":
+            all_b.sort(key=lambda item: int(item.get("size", 0)), reverse=True)
+        else:
+            all_b.sort(key=lambda item: item.get("timestamp", ""), reverse=sort_code != "old")
+        total_backups = len(all_b)
+        self._backup_page, start, end = self._page_range(
+            self._backup_page, total_backups, self._backup_page_size)
+        total_pages = max(1, (total_backups + self._backup_page_size - 1) // self._backup_page_size)
         page_backups = all_b[start:end]
 
         if self._backup_page_label:
@@ -13449,48 +14154,62 @@ class SteamSaveManager(ctk.CTk):
             item = self._backup_rows.get(key)
             if item is None:
                 card = ctk.CTkFrame(self._bk_scroll,
-                                    fg_color=("#f1f5f9", "#252640"), corner_radius=12)
-                card.grid_columnconfigure(1, weight=1)
+                                    fg_color=("#f8fafc", "#252640"), corner_radius=4)
+                card.grid_columnconfigure(0, weight=1)
                 title = ctk.CTkLabel(card, text="", font=font(13, "bold"),
-                                     text_color=C_BODY_TEXT, wraplength=400)
-                title.grid(row=0, column=0, padx=14, pady=(10, 0), sticky="w")
+                                     text_color=C_BODY_TEXT, wraplength=520, anchor="w")
+                title.grid(row=0, column=0, padx=14, pady=(8, 0), sticky="w")
                 self._register_wrap(title, 0.56, 260)
                 info_label = ctk.CTkLabel(card, text="", font=font(11),
-                                          text_color=C_SUBTLE_TEXT, wraplength=400)
-                info_label.grid(row=1, column=0, padx=14, pady=(0, 10), sticky="w")
+                                          text_color=C_SUBTLE_TEXT, wraplength=520, anchor="w")
+                info_label.grid(row=1, column=0, padx=14, pady=(0, 8), sticky="w")
                 self._register_wrap(info_label, 0.56, 260)
-                bb = ctk.CTkFrame(card, fg_color="transparent")
-                bb.grid(row=0, column=1, rowspan=2, padx=14, pady=10, sticky="e")
+                integrity_label = ctk.CTkLabel(
+                    card, text="", width=82, font=font(11, "bold"), text_color=C_SUBTLE_TEXT)
+                integrity_label.grid(row=0, column=1, rowspan=2, padx=6, pady=8)
                 restore_btn = self._register_busy_widget(ctk.CTkButton(
-                    bb, text=self.bi("还原", "Restore"), width=60, height=28, font=font(12),
-                    corner_radius=6, fg_color=BTN_SUCCESS, hover_color=BTN_SUCCESS_H))
-                restore_btn.pack(side="left", padx=2)
-                delete_btn = self._register_busy_widget(ctk.CTkButton(
-                    bb, text=self.bi("删除", "Delete"), width=60, height=28, font=font(12),
-                    corner_radius=6, fg_color=BTN_DANGER, hover_color=BTN_DANGER_H))
-                delete_btn.pack(side="left", padx=2)
+                    card, text=self.bi("还原", "Restore"), width=72, height=32, font=font(12, "bold"),
+                    corner_radius=6, fg_color=BTN_PRIMARY, hover_color=BTN_PRIMARY_H))
+                restore_btn.grid(row=0, column=2, rowspan=2, padx=3, pady=8)
+                more_btn = self._register_busy_widget(ctk.CTkButton(
+                    card, text=UI_ICON["more"], width=34, height=32, font=font(16, "bold"),
+                    corner_radius=6, fg_color="transparent", hover_color=C_NAV_HOVER,
+                    text_color=C_BODY_TEXT))
+                more_btn.grid(row=0, column=3, rowspan=2, padx=(3, 10), pady=8)
+                self._attach_tooltip(more_btn, lambda: self.bi("更多操作", "More actions"))
                 item = {
                     "card": card,
                     "title": title,
                     "info": info_label,
+                    "integrity": integrity_label,
                     "restore_btn": restore_btn,
-                    "delete_btn": delete_btn,
+                    "more_btn": more_btn,
                 }
                 self._backup_rows[key] = item
-            item["title"].configure(text=f"🎮 {b['game']}")
+            item["title"].configure(text=b["game"])
             info = f"{self._fmt_ts(b['timestamp'])}  ·  {fmt_size(b['size'])}"
             note_text = localize_backup_note(b.get("note", ""), cfg_language(self.cfg))
             if note_text:
-                info += f"  ·  📝 {note_text}"
+                info += f"  ·  {note_text}"
             item["info"].configure(text=info)
+            archive_ok = os.path.isfile(str(b.get("path", "")))
+            item["integrity"].configure(
+                text=self.bi("文件正常", "Available") if archive_ok else self.bi("文件缺失", "Missing"),
+                text_color=BTN_SUCCESS if archive_ok else BTN_DANGER)
             item["restore_btn"].configure(command=lambda bp=b: self._restore(bp))
-            item["delete_btn"].configure(command=lambda bp=b: self._del_bk(bp))
+            item["more_btn"].configure(command=lambda button=item["more_btn"], bp=b: self._show_action_menu(
+                button,
+                [
+                    (self.bi("复制备份路径", "Copy Backup Path"), lambda: self._copy_to_clipboard(str(bp.get("path", ""))), False),
+                    (self.bi("删除备份", "Delete Backup"), lambda: self._del_bk(bp), True),
+                ]))
             item["card"].pack(fill="x", padx=4, pady=2)
         stale_keys = [key for key in self._backup_rows.keys() if key not in active_keys]
         for key in stale_keys:
             item = self._backup_rows.pop(key, None)
             if item:
                 item["card"].destroy()
+        self._schedule_responsive_update()
 
     def _restore(self, b):
         if self._io_busy: return
@@ -13544,6 +14263,141 @@ class SteamSaveManager(ctk.CTk):
         self._show_delete_backup_followup(result)
 
     # ─── 设置 ───
+    def _show_settings_page(self, value):
+        if not getattr(self, "_settings_pages", None):
+            return
+        code = self._settings_tab_codes.get(value, value if value in self._settings_pages else "general")
+        for page in self._settings_pages.values():
+            page.grid_remove()
+        page = self._settings_pages.get(code)
+        if page is not None:
+            page.grid(row=0, column=0, sticky="nsew")
+        label = self._settings_tab_labels.get(code)
+        if label and hasattr(self, "_settings_tab_var"):
+            self._settings_tab_var.set(label)
+
+    def _create_number_stepper(self, parent, value, callback, minimum, maximum, step=1, decimal=False):
+        wrapper = ctk.CTkFrame(parent, fg_color="transparent")
+        minus = ctk.CTkButton(
+            wrapper, text=UI_ICON["remove"], width=32, height=32, corner_radius=6,
+            fg_color=BTN_SECONDARY, hover_color=BTN_SECONDARY_H,
+            text_color=C_BODY_TEXT)
+        minus.pack(side="left")
+        entry = ctk.CTkEntry(wrapper, width=72, height=32, justify="center", font=font(12))
+        entry.insert(0, str(value))
+        entry.pack(side="left", padx=4)
+        plus = ctk.CTkButton(
+            wrapper, text=UI_ICON["add"], width=32, height=32, corner_radius=6,
+            fg_color=BTN_SECONDARY, hover_color=BTN_SECONDARY_H,
+            text_color=C_BODY_TEXT)
+        plus.pack(side="left")
+        entry._stepper_controls = (minus, plus)
+        entry._stepper_wrapper = wrapper
+        minus.configure(command=lambda: self._step_number_entry(
+            entry, -step, callback, minimum, maximum, decimal))
+        plus.configure(command=lambda: self._step_number_entry(
+            entry, step, callback, minimum, maximum, decimal))
+        self._bind_entry_apply(entry, callback)
+        return entry
+
+    def _step_number_entry(self, entry, delta, callback, minimum, maximum, decimal=False):
+        try:
+            current = float(entry.get()) if decimal else int(entry.get())
+        except (TypeError, ValueError):
+            current = minimum
+        value = min(maximum, max(minimum, current + delta))
+        if not decimal:
+            value = int(value)
+        self._set_entry_value(entry, value)
+        callback()
+        self._mark_settings_saved()
+
+    @staticmethod
+    def _set_stepper_state(entry, state: str):
+        if entry is None:
+            return
+        try:
+            entry.configure(state=state)
+            for control in getattr(entry, "_stepper_controls", ()):
+                control.configure(state=state)
+        except Exception:
+            pass
+
+    def _mark_settings_saved(self, text=None, error: bool = False):
+        label = getattr(self, "_settings_save_status", None)
+        if label is None:
+            return
+        label.configure(
+            text=text or self.bi("已保存", "Saved"),
+            text_color=BTN_DANGER if error else BTN_SUCCESS)
+        previous = getattr(self, "_settings_saved_job", None)
+        if previous is not None:
+            try:
+                self.after_cancel(previous)
+            except Exception:
+                pass
+        self._settings_saved_job = self.after(
+            1800, lambda: label.configure(text="") if label.winfo_exists() else None)
+
+    def _refresh_settings_dependency_states(self):
+        auto_enabled = bool(self.cfg.get("auto_backup_enabled"))
+        watch_enabled = bool(self.cfg.get("watch_enabled")) and HAS_WATCHDOG
+        sync_enabled = bool(self.cfg.get("sync_enabled"))
+        self._set_stepper_state(getattr(self, "_int_e", None), "normal" if auto_enabled else "disabled")
+        self._set_stepper_state(getattr(self, "_cd_e", None), "normal" if watch_enabled else "disabled")
+        interval_enabled = sync_enabled and self.cfg.get("sync_mode", "smart") != "smart"
+        self._set_stepper_state(getattr(self, "_sync_int_e", None), "normal" if interval_enabled else "disabled")
+        for widget_name in ("_sync_mode_control", "_sync_backend_control"):
+            widget = getattr(self, widget_name, None)
+            if widget is not None:
+                widget.configure(state="normal" if sync_enabled else "disabled")
+
+    def _refresh_sync_backend_panels(self):
+        if not hasattr(self, "_sync_backend_var"):
+            return
+        backend = self._sync_backend_codes.get(self._sync_backend_var.get(), "webdav" if self.cfg.get("webdav_enabled") else "folder")
+        self.cfg["webdav_enabled"] = backend == "webdav"
+        self._webdav_var.set("on" if backend == "webdav" else "off")
+        if backend == "webdav":
+            self._sync_folder_fields.grid_remove()
+            self._webdav_fields.grid()
+        else:
+            self._webdav_fields.grid_remove()
+            self._sync_folder_fields.grid()
+        self._refresh_sync_backend_status()
+
+    def _refresh_sync_backend_status(self):
+        label = getattr(self, "_sync_backend_status", None)
+        if label is None:
+            return
+        issue = get_sync_backend_issue(self.cfg.get("sync_folder", ""), self.cfg)
+        if issue:
+            labels = {
+                "webdav_component_missing": self.bi("WebDAV 组件不可用", "WebDAV component unavailable"),
+                "webdav_url_missing": self.bi("服务器地址未填写", "Server URL is missing"),
+                "webdav_credentials_incomplete": self.bi("用户名或密码不完整", "Credentials are incomplete"),
+            }
+            label.configure(
+                text=labels.get(issue, self.bi("同步位置未配置", "Sync location is not configured")),
+                text_color=BTN_WARN)
+        else:
+            label.configure(text=self.bi("同步位置已就绪", "Sync location ready"), text_color=BTN_SUCCESS)
+
+    def _on_sync_backend_change(self, _value=None):
+        backend = self._sync_backend_codes.get(self._sync_backend_var.get(), "folder")
+        self.cfg["webdav_enabled"] = backend == "webdav"
+        save_config(self.cfg)
+        self._refresh_sync_backend_panels()
+        self._restart_sync_runtime()
+        self._mark_settings_saved()
+
+    def _toggle_webdav_password_visibility(self):
+        self._webdav_password_visible = not getattr(self, "_webdav_password_visible", False)
+        self._webdav_pass_e.configure(show="" if self._webdav_password_visible else "*")
+        if hasattr(self, "_webdav_password_btn"):
+            self._webdav_password_btn.configure(
+                text=self.bi("隐藏", "Hide") if self._webdav_password_visible else self.bi("显示", "Show"))
+
     def _build_settings_frame(self):
         frame = ctk.CTkFrame(self, fg_color=C_MAIN_BG)
         self._frames["settings"] = frame
@@ -13551,616 +14405,492 @@ class SteamSaveManager(ctk.CTk):
         frame.grid_rowconfigure(1, weight=1)
 
         hdr = ctk.CTkFrame(frame, fg_color="transparent")
-        hdr.grid(row=0, column=0, padx=32, pady=(28, 12), sticky="ew")
+        hdr.grid(row=0, column=0, padx=32, pady=(24, 10), sticky="ew")
         hdr.grid_columnconfigure(0, weight=1)
-        ctk.CTkLabel(hdr, text=self.t("settings_title"), font=font(20, "bold")).grid(
-            row=0, column=0, sticky="w")
-        settings_subtitle = ctk.CTkLabel(
-            hdr, text=self.t("settings_subtitle"), font=font(12),
-            text_color=C_SUBTLE_TEXT, anchor="w", justify="left")
-        settings_subtitle.grid(row=1, column=0, sticky="ew", pady=(4, 0))
-        self._register_wrap(settings_subtitle, 0.58, 300)
+        ctk.CTkLabel(
+            hdr, text=self.bi("设置", "Settings"), font=font(20, "bold")
+        ).grid(row=0, column=0, sticky="w")
+        self._settings_save_status = ctk.CTkLabel(
+            hdr, text="", width=72, font=font(11), text_color=BTN_SUCCESS)
+        self._settings_save_status.grid(row=0, column=1, padx=(8, 12), sticky="e")
+
+        settings_tabs = [
+            ("general", self.bi("基础", "General")),
+            ("backup", self.bi("备份", "Backup")),
+            ("sync", self.bi("云同步", "Cloud Sync")),
+            ("system", self.bi("系统", "System")),
+        ]
+        self._settings_tab_codes = {label: code for code, label in settings_tabs}
+        self._settings_tab_labels = {code: label for code, label in settings_tabs}
+        self._settings_tab_var = ctk.StringVar(value=settings_tabs[0][1])
         ctk.CTkSegmentedButton(
-            hdr,
-            values=[
-                self.t("section_general"),
-                self.t("section_automation"),
-                self.t("section_system"),
-            ],
-            font=font(12),
-            command=lambda value: self._scroll_settings_to_section({
-                self.t("section_general"): "general",
-                self.t("section_automation"): "automation",
-                self.t("section_system"): "system",
-            }.get(value, "general")),
-        ).grid(row=0, column=1, rowspan=2, padx=(18, 0), sticky="e")
+            hdr, values=[label for _, label in settings_tabs],
+            variable=self._settings_tab_var, font=font(12),
+            command=self._show_settings_page
+        ).grid(row=0, column=2, sticky="e")
 
-        settings_host = ctk.CTkFrame(frame, fg_color=C_MAIN_BG, corner_radius=0)
-        settings_host.grid(row=1, column=0, padx=0, pady=(0, 16), sticky="nsew")
-        settings_host.grid_columnconfigure(0, weight=1)
-        settings_host.grid_rowconfigure(0, weight=1)
+        host = ctk.CTkFrame(frame, fg_color=C_MAIN_BG, corner_radius=0)
+        host.grid(row=1, column=0, sticky="nsew")
+        host.grid_columnconfigure(0, weight=1)
+        host.grid_rowconfigure(0, weight=1)
+        self._settings_pages = {}
+        for code, _label in settings_tabs:
+            page = ctk.CTkScrollableFrame(host, fg_color=C_MAIN_BG, corner_radius=0)
+            page.grid_columnconfigure(0, weight=1)
+            self._settings_pages[code] = page
+        self._settings_section_positions = dict(self._settings_pages)
 
-        def _current_canvas_bg():
-            return C_MAIN_BG[0] if ctk.get_appearance_mode().lower() == "light" else C_MAIN_BG[1]
+        def _intro(page, title, subtitle):
+            ctk.CTkLabel(
+                page, text=title, font=font(16, "bold"), text_color=C_BODY_TEXT
+            ).grid(row=0, column=0, padx=30, pady=(8, 2), sticky="w")
+            label = ctk.CTkLabel(
+                page, text=subtitle, font=font(11), text_color=C_SUBTLE_TEXT,
+                anchor="w", justify="left")
+            label.grid(row=1, column=0, padx=30, pady=(0, 10), sticky="ew")
+            self._register_wrap(label, 0.72, 300)
 
-        settings_canvas = tkinter.Canvas(
-            settings_host, bg=_current_canvas_bg(), highlightthickness=0, bd=0)
-        settings_canvas.grid(row=0, column=0, sticky="nsew")
-
-        def _apply_settings_moveto(fraction):
-            fraction = max(0.0, min(float(fraction), 1.0))
-            settings_canvas.yview_moveto(fraction)
-            settings_canvas.update_idletasks()
-
-        # ── Scrollbar colors (theme-aware, update dynamically) ──
-        _SB_COLORS = {
-            "light": dict(bg=C_MAIN_BG[0], track="#e2e2e2", thumb="#c0c0c0",
-                          hover="#a0a0a0", press="#888888"),
-            "dark":  dict(bg=C_MAIN_BG[1], track="#333348", thumb="#555568",
-                          hover="#6e6e82", press="#8888a0"),
-        }
-
-        def _sb_colors():
-            mode = "light" if ctk.get_appearance_mode().lower() == "light" else "dark"
-            return _SB_COLORS[mode]
-
-        settings_scrollbar = tkinter.Canvas(
-            settings_host, width=12,
-            bg=_sb_colors()["bg"],
-            highlightthickness=0, bd=0, cursor="hand2")
-        settings_scrollbar.grid(row=0, column=1, sticky="ns", padx=(0, 6), pady=6)
-
-        _settings_track_id = settings_scrollbar.create_line(
-            6, 8, 6, 42, fill=_sb_colors()["track"],
-            width=4, capstyle=tkinter.ROUND, state=tkinter.HIDDEN)
-        _settings_thumb_id = settings_scrollbar.create_line(
-            6, 8, 6, 42, fill=_sb_colors()["thumb"],
-            width=7, capstyle=tkinter.ROUND, state=tkinter.HIDDEN)
-
-        _settings_thumb_span = (0.0, 1.0)
-        _settings_dragging = False
-        _settings_drag_offset = 0.0
-        _settings_pending_moveto = None
-        _settings_drag_job = None
-        _settings_scrollbar_visible = False
-        _settings_hide_job = None
-        _settings_hovering = False
-
-        def _settings_show_scrollbar():
-            nonlocal _settings_scrollbar_visible, _settings_hide_job
-            if _settings_hide_job is not None:
-                settings_scrollbar.after_cancel(_settings_hide_job)
-                _settings_hide_job = None
-            if not _settings_scrollbar_visible:
-                _settings_scrollbar_visible = True
-                settings_scrollbar.itemconfigure(_settings_track_id, state=tkinter.NORMAL)
-                settings_scrollbar.itemconfigure(_settings_thumb_id, state=tkinter.NORMAL)
-
-        def _settings_schedule_hide():
-            nonlocal _settings_hide_job
-            if _settings_hide_job is not None:
-                settings_scrollbar.after_cancel(_settings_hide_job)
-            _settings_hide_job = settings_scrollbar.after(1200, _settings_hide_scrollbar)
-
-        def _settings_hide_scrollbar():
-            nonlocal _settings_scrollbar_visible, _settings_hide_job
-            _settings_hide_job = None
-            if _settings_dragging or _settings_hovering:
-                return
-            _settings_scrollbar_visible = False
-            settings_scrollbar.itemconfigure(_settings_track_id, state=tkinter.HIDDEN)
-            settings_scrollbar.itemconfigure(_settings_thumb_id, state=tkinter.HIDDEN)
-
-        def _settings_apply_thumb_color():
-            colors = _sb_colors()
-            if _settings_dragging:
-                fill = colors["press"]
-            elif _settings_hovering:
-                fill = colors["hover"]
-            else:
-                fill = colors["thumb"]
-            settings_scrollbar.itemconfigure(_settings_thumb_id, fill=fill)
-
-        def _draw_settings_thumb(first, last):
-            nonlocal _settings_thumb_span
-            start = max(0.0, min(float(first), 1.0))
-            end = max(start, min(float(last), 1.0))
-            _settings_thumb_span = (start, end)
-            if end - start >= 0.999:
-                settings_scrollbar.itemconfigure(_settings_track_id, state=tkinter.HIDDEN)
-                settings_scrollbar.itemconfigure(_settings_thumb_id, state=tkinter.HIDDEN)
-                _settings_scrollbar_visible = False
-                return
-            _settings_show_scrollbar()
-            _preview_settings_thumb(start)
-
-        def _preview_settings_thumb(start):
-            start = max(0.0, min(float(start), 1.0))
-            span = max(_settings_thumb_span[1] - _settings_thumb_span[0], 0.0)
-            height = max(settings_scrollbar.winfo_height(), 1)
-            track_top = 8
-            track_bottom = max(track_top + 1, height - 8)
-            track_height = max(track_bottom - track_top, 1)
-            thumb_min = 28
-            thumb_height = max(thumb_min, int(span * track_height))
-            thumb_height = min(thumb_height, track_height)
-            max_top = track_bottom - thumb_height
-            thumb_top = track_top + int(start * max(track_height - thumb_height, 0))
-            thumb_top = max(track_top, min(thumb_top, max_top))
-            thumb_bottom = thumb_top + thumb_height
-            settings_scrollbar.coords(_settings_track_id, 6, track_top, 6, track_bottom)
-            settings_scrollbar.coords(_settings_thumb_id, 6, thumb_top, 6, thumb_bottom)
-
-        def _settings_scrollbar_set(first, last):
-            _draw_settings_thumb(first, last)
-            _settings_schedule_hide()
-
-        settings_canvas.configure(yscrollcommand=_settings_scrollbar_set)
-
-        def _settings_thumb_fraction_from_y(y):
-            _x1, y1, _x2, y2 = settings_scrollbar.coords(_settings_thumb_id)
-            thumb_height = max(y2 - y1, 1)
-            height = max(settings_scrollbar.winfo_height(), 1)
-            track_top = 8
-            track_height = max(height - 16, 1)
-            movable = max(track_height - thumb_height, 1)
-            thumb_top = y - _settings_drag_offset
-            thumb_top = max(track_top, min(thumb_top, track_top + movable))
-            return (thumb_top - track_top) / movable
-
-        def _settings_scrollbar_press(event):
-            nonlocal _settings_dragging, _settings_drag_offset, _settings_pending_moveto, _settings_drag_job
-            _x1, y1, _x2, y2 = settings_scrollbar.coords(_settings_thumb_id)
-            if y1 <= event.y <= y2:
-                _settings_dragging = True
-                _settings_drag_offset = event.y - y1
-                _settings_pending_moveto = None
-                if _settings_drag_job is not None:
-                    settings_scrollbar.after_cancel(_settings_drag_job)
-                    _settings_drag_job = None
-                _settings_apply_thumb_color()
-            else:
-                _apply_settings_moveto(_settings_thumb_fraction_from_y(event.y))
-
-        def _flush_settings_drag():
-            nonlocal _settings_drag_job
-            _settings_drag_job = None
-            if _settings_dragging and _settings_pending_moveto is not None:
-                _apply_settings_moveto(_settings_pending_moveto)
-                _settings_drag_job = settings_scrollbar.after(16, _flush_settings_drag)
-
-        def _settings_scrollbar_drag(event):
-            nonlocal _settings_pending_moveto, _settings_drag_job
-            if not _settings_dragging:
-                return
-            _settings_pending_moveto = _settings_thumb_fraction_from_y(event.y)
-            _preview_settings_thumb(_settings_pending_moveto)
-            if _settings_drag_job is None:
-                _settings_drag_job = settings_scrollbar.after(16, _flush_settings_drag)
-
-        def _settings_scrollbar_release(_event):
-            nonlocal _settings_dragging, _settings_pending_moveto, _settings_drag_job
-            _settings_dragging = False
-            if _settings_drag_job is not None:
-                settings_scrollbar.after_cancel(_settings_drag_job)
-                _settings_drag_job = None
-            if _settings_pending_moveto is not None:
-                _apply_settings_moveto(_settings_pending_moveto)
-            _settings_pending_moveto = None
-            _settings_apply_thumb_color()
-            _settings_schedule_hide()
-
-        def _settings_scrollbar_enter(_event):
-            nonlocal _settings_hovering
-            _settings_hovering = True
-            _settings_show_scrollbar()
-            _settings_apply_thumb_color()
-
-        def _settings_scrollbar_leave(_event):
-            nonlocal _settings_hovering
-            _settings_hovering = False
-            if not _settings_dragging:
-                _settings_apply_thumb_color()
-                _settings_schedule_hide()
-
-        settings_scrollbar.bind("<ButtonPress-1>", _settings_scrollbar_press)
-        settings_scrollbar.bind("<B1-Motion>", _settings_scrollbar_drag)
-        settings_scrollbar.bind("<ButtonRelease-1>", _settings_scrollbar_release)
-        settings_scrollbar.bind("<Enter>", _settings_scrollbar_enter)
-        settings_scrollbar.bind("<Leave>", _settings_scrollbar_leave)
-
-        settings_scroll = ctk.CTkFrame(settings_canvas, fg_color=C_MAIN_BG, corner_radius=0)
-        settings_scroll.grid_columnconfigure(0, weight=1)
-        settings_window = settings_canvas.create_window((0, 0), window=settings_scroll, anchor="nw")
-        self._settings_scroll = settings_canvas
-
-        def _update_settings_scrollregion(_event=None):
-            settings_canvas.configure(scrollregion=settings_canvas.bbox("all"))
-
-        def _fit_settings_width(_event):
-            settings_canvas.itemconfigure(settings_window, width=_event.width)
-
-        def _settings_mousewheel(event):
-            try:
-                focused_popup = any(
-                    window.winfo_exists() and window.focus_displayof() is not None
-                    for window in list(self._popup_windows)
-                )
-                if focused_popup:
-                    return
-            except Exception:
-                pass
-            try:
-                target_widget = self.winfo_containing(event.x_root, event.y_root)
-            except Exception:
-                target_widget = None
-            inside_settings = False
-            while target_widget is not None:
-                if target_widget == settings_host:
-                    inside_settings = True
-                    break
-                try:
-                    target_widget = target_widget.master
-                except Exception:
-                    target_widget = None
-            if not inside_settings:
-                return
-            if sys.platform.startswith("win"):
-                delta = -int(event.delta / 120) if event.delta else 0
-            else:
-                delta = -1 if event.delta > 0 else 1
-            if delta:
-                settings_canvas.yview_scroll(delta * 3, "units")
-
-        settings_scroll.bind("<Configure>", _update_settings_scrollregion)
-        settings_canvas.bind("<Configure>", _fit_settings_width)
-        settings_canvas.bind_all("<MouseWheel>", _settings_mousewheel, add="+")
-
-        def _section(parent, title_key: str, subtitle_key: str):
-            card = ctk.CTkFrame(parent, fg_color=C_CARD_BG, corner_radius=16)
-            card.pack(fill="x", padx=30, pady=(0, 14))
+        def _row(page, row, title, description=""):
+            card = ctk.CTkFrame(
+                page, fg_color=C_CARD_BG, corner_radius=6,
+                border_width=1, border_color=C_SIDEBAR_SEP)
+            card.grid(row=row, column=0, padx=30, pady=4, sticky="ew")
             card.grid_columnconfigure(0, weight=1)
-            ctk.CTkLabel(card, text=self.t(title_key), font=font(15, "bold"),
-                         text_color=C_BODY_TEXT).grid(row=0, column=0, padx=22, pady=(18, 2), sticky="w")
-            subtitle = ctk.CTkLabel(
-                card, text=self.t(subtitle_key), font=font(11),
-                text_color=C_SUBTLE_TEXT, anchor="w", justify="left")
-            subtitle.grid(row=1, column=0, padx=22, pady=(0, 12), sticky="ew")
-            self._register_wrap(subtitle, 0.72, 320)
-            return card
+            ctk.CTkLabel(
+                card, text=title, font=font(12, "bold"), text_color=C_BODY_TEXT,
+                anchor="w").grid(row=0, column=0, padx=14, pady=(10, 0), sticky="w")
+            description_label = ctk.CTkLabel(
+                card, text=description, font=font(11), text_color=C_SUBTLE_TEXT,
+                anchor="w", justify="left")
+            description_label.grid(row=1, column=0, padx=14, pady=(1, 10), sticky="w")
+            self._register_wrap(description_label, 0.42, 200)
+            controls = ctk.CTkFrame(card, fg_color="transparent")
+            controls.grid(row=0, column=1, rowspan=2, padx=14, pady=8, sticky="e")
+            return controls
 
-        def _label(parent, row, text_key):
-            ctk.CTkLabel(parent, text=self.t(text_key), font=font(13, "bold"),
-                         text_color=C_BODY_TEXT).grid(row=row, column=0, padx=22, pady=(6, 4), sticky="w")
+        def _wide_row(page, row, title, description=""):
+            card = ctk.CTkFrame(
+                page, fg_color=C_CARD_BG, corner_radius=6,
+                border_width=1, border_color=C_SIDEBAR_SEP)
+            card.grid(row=row, column=0, padx=30, pady=4, sticky="ew")
+            card.grid_columnconfigure(0, weight=1)
+            ctk.CTkLabel(
+                card, text=title, font=font(12, "bold"), text_color=C_BODY_TEXT,
+                anchor="w").grid(row=0, column=0, padx=14, pady=(10, 0), sticky="w")
+            description_label = ctk.CTkLabel(
+                card, text=description, font=font(11), text_color=C_SUBTLE_TEXT,
+                anchor="w", justify="left")
+            description_label.grid(row=1, column=0, padx=14, pady=(1, 7), sticky="w")
+            self._register_wrap(description_label, 0.72, 300)
+            controls = ctk.CTkFrame(card, fg_color="transparent")
+            controls.grid(row=2, column=0, padx=14, pady=(0, 12), sticky="ew")
+            controls.grid_columnconfigure(0, weight=1)
+            return controls
 
-        def _row(parent):
-            return ctk.CTkFrame(parent, fg_color=C_CARD_BG, corner_radius=8)
+        general = self._settings_pages["general"]
+        _intro(
+            general, self.bi("基础设置", "General"),
+            self.bi("界面语言、主题与 Steam 检测", "Language, appearance, and Steam detection"))
 
-        general = _section(settings_scroll, "section_general", "section_general_sub")
-        automation = _section(settings_scroll, "section_automation", "section_automation_sub")
-        system = _section(settings_scroll, "section_system", "section_system_sub")
-        self._settings_section_positions = {
-            "general": general,
-            "automation": automation,
-            "system": system,
-        }
-
-        # General
-        general.grid_columnconfigure(0, weight=1)
-        _label(general, 2, "language")
+        controls = _row(
+            general, 2, self.t("language"),
+            self.bi("切换后界面会立即重新载入", "The interface reloads immediately"))
         self._language_var = ctk.StringVar(value=self._language_display(self.lang))
-        lang_row = _row(general)
-        lang_row.grid(row=3, column=0, padx=22, sticky="ew")
         self._language_menu = ctk.CTkOptionMenu(
-            lang_row, variable=self._language_var,
+            controls, variable=self._language_var,
             values=[self._language_display(code) for code in SUPPORTED_LANGUAGES],
             width=180, font=font(12), command=self._on_language_change)
         self._language_menu.pack(side="left")
-        ctk.CTkLabel(lang_row, text=self.t("language_hint"), font=font(11),
-                     text_color=C_SUBTLE_TEXT).pack(side="left", padx=(10, 0))
 
-        _label(general, 4, "theme")
-        self._theme_var = ctk.StringVar(value=self._theme_display(self.cfg.get("theme", "light")))
+        controls = _row(
+            general, 3, self.t("theme"),
+            self.bi("浅色或深色界面", "Light or dark appearance"))
+        self._theme_var = ctk.StringVar(
+            value=self._theme_display(self.cfg.get("theme", "light")))
         ctk.CTkSegmentedButton(
-            general,
-            values=[self.t("theme_light"), self.t("theme_dark")],
-            variable=self._theme_var, font=font(12),
-            command=self._on_theme
-        ).grid(row=5, column=0, padx=22, sticky="w")
+            controls, values=[self.t("theme_light"), self.t("theme_dark")],
+            variable=self._theme_var, font=font(12), command=self._on_theme
+        ).pack(side="left")
 
-        _label(general, 6, "steam_path")
-        sf = _row(general)
-        sf.grid(row=7, column=0, padx=22, pady=(0, 10), sticky="ew")
-        sf.grid_columnconfigure(0, weight=1)
-        self._steam_e = ctk.CTkEntry(sf, font=font(12))
+        controls = _wide_row(
+            general, 4, self.t("steam_path"),
+            self.bi("用于扫描已安装游戏和 Steam 账号", "Used to scan installed games and Steam accounts"))
+        self._steam_e = ctk.CTkEntry(controls, font=font(12))
         self._steam_e.insert(0, self.cfg.get("steam_path", ""))
         self._steam_e.grid(row=0, column=0, sticky="ew")
         self._bind_entry_apply(self._steam_e, self._apply_steam_path)
-        ctk.CTkButton(sf, text=self.t("browse"), width=80, font=font(12),
-                      command=lambda: self._browse(self._steam_e, self._apply_steam_path)).grid(row=0, column=1, padx=(8, 0))
+        ctk.CTkButton(
+            controls, text=self.t("browse"), width=82, height=32, font=font(12),
+            corner_radius=6, fg_color=BTN_SECONDARY, hover_color=BTN_SECONDARY_H,
+            text_color=C_BODY_TEXT,
+            command=lambda: self._browse(self._steam_e, self._apply_steam_path)
+        ).grid(row=0, column=1, padx=(8, 0))
 
-        _label(general, 8, "steamdb_detection")
+        controls = _row(
+            general, 5, self.t("steamdb_detection"),
+            self.t("steamdb_detection_desc"))
         self._steamdb_detection_var = ctk.StringVar(
             value="on" if self.cfg.get("steamdb_detection_enabled") else "off")
         ctk.CTkSwitch(
-            general, text=self.t("steamdb_detection_desc"),
-            variable=self._steamdb_detection_var, onvalue="on", offvalue="off",
-            font=font(12), command=self._toggle_steamdb_detection
-        ).grid(row=9, column=0, padx=22, pady=(0, 18), sticky="w")
+            controls, text="", width=42, variable=self._steamdb_detection_var,
+            onvalue="on", offvalue="off", command=self._toggle_steamdb_detection
+        ).pack(side="left")
 
-        # Automation
-        _label(automation, 2, "auto_backup")
-        af = _row(automation)
-        af.grid(row=3, column=0, padx=22, sticky="w")
-        self._auto_var = ctk.StringVar(value="on" if self.cfg.get("auto_backup_enabled") else "off")
-        ctk.CTkSwitch(af, text=self.t("enable"), variable=self._auto_var,
-                      onvalue="on", offvalue="off", font=font(12),
-                      command=self._toggle_auto).pack(side="left")
-        ctk.CTkLabel(af, text=f"  {self.t('interval_minutes')}:", font=font(12)).pack(side="left")
-        self._int_e = ctk.CTkEntry(af, width=64, font=font(12))
-        self._int_e.insert(0, str(self.cfg.get("auto_backup_interval", 30)))
-        self._int_e.pack(side="left", padx=(6, 0))
-        self._bind_entry_apply(self._int_e, self._apply_auto_backup_interval)
+        backup = self._settings_pages["backup"]
+        _intro(
+            backup, self.bi("备份自动化", "Backup Automation"),
+            self.bi("控制备份触发条件与本地保留策略", "Control backup triggers and local retention"))
 
-        _label(automation, 4, "file_watch")
-        wf = _row(automation)
-        wf.grid(row=5, column=0, padx=22, sticky="w")
-        self._watch_var = ctk.StringVar(value="on" if self.cfg.get("watch_enabled") else "off")
-        ctk.CTkSwitch(wf, text=self.t("enable"), variable=self._watch_var,
-                      onvalue="on", offvalue="off", font=font(12),
-                      command=self._toggle_watch).pack(side="left")
-        ctk.CTkLabel(wf, text=f"  {self.t('cooldown_seconds')}:", font=font(12)).pack(side="left")
-        self._cd_e = ctk.CTkEntry(wf, width=64, font=font(12))
-        self._cd_e.insert(0, str(self.cfg.get("watch_cooldown", 60)))
-        self._cd_e.pack(side="left", padx=(6, 0))
-        self._bind_entry_apply(self._cd_e, self._apply_watch_cooldown)
-        if not HAS_WATCHDOG:
-            ctk.CTkLabel(automation, text=self.t("watchdog_missing"),
-                         font=font(11), text_color="#ea580c").grid(
-                row=6, column=0, padx=22, pady=(4, 0), sticky="w")
+        controls = _row(
+            backup, 2, self.t("auto_backup"),
+            self.bi("仅在游戏运行时按间隔检查", "Checks at the selected interval while a game is running"))
+        self._auto_var = ctk.StringVar(
+            value="on" if self.cfg.get("auto_backup_enabled") else "off")
+        ctk.CTkSwitch(
+            controls, text=self.t("enable"), variable=self._auto_var,
+            onvalue="on", offvalue="off", font=font(12),
+            command=self._toggle_auto).pack(side="left", padx=(0, 10))
+        self._int_e = self._create_number_stepper(
+            controls, self.cfg.get("auto_backup_interval", 30),
+            self._apply_auto_backup_interval, 1, 1440, 5)
+        self._int_e._stepper_wrapper.pack(side="left")
+        ctk.CTkLabel(
+            controls, text=self.bi("分钟", "min"), font=font(11),
+            text_color=C_SUBTLE_TEXT).pack(side="left", padx=(6, 0))
 
-        _label(automation, 7, "auto_sync")
-        sy1 = _row(automation)
-        sy1.grid(row=8, column=0, padx=22, sticky="w")
-        self._sync_var = ctk.StringVar(value="on" if self.cfg.get("sync_enabled") else "off")
-        ctk.CTkSwitch(sy1, text=self.t("enable"), variable=self._sync_var,
-                      onvalue="on", offvalue="off", font=font(12),
-                      command=self._toggle_sync).pack(side="left")
-        ctk.CTkLabel(sy1, text=f"  {self.t('interval_minutes')}:", font=font(12)).pack(side="left")
-        self._sync_int_e = ctk.CTkEntry(sy1, width=64, font=font(12))
-        self._sync_int_e.insert(0, str(self.cfg.get("sync_interval", 10)))
-        self._sync_int_e.pack(side="left", padx=(6, 0))
-        self._bind_entry_apply(self._sync_int_e, self._apply_sync_interval)
+        controls = _row(
+            backup, 3, self.t("file_watch"),
+            self.bi("存档变化后等待冷却时间再备份", "Waits for the cooldown after save files change"))
+        self._watch_var = ctk.StringVar(
+            value="on" if self.cfg.get("watch_enabled") else "off")
+        ctk.CTkSwitch(
+            controls, text=self.t("enable"), variable=self._watch_var,
+            onvalue="on", offvalue="off", font=font(12),
+            state="normal" if HAS_WATCHDOG else "disabled",
+            command=self._toggle_watch).pack(side="left", padx=(0, 10))
+        self._cd_e = self._create_number_stepper(
+            controls, self.cfg.get("watch_cooldown", 60),
+            self._apply_watch_cooldown, 10, 3600, 10)
+        self._cd_e._stepper_wrapper.pack(side="left")
+        ctk.CTkLabel(
+            controls, text=self.bi("秒", "sec"), font=font(11),
+            text_color=C_SUBTLE_TEXT).pack(side="left", padx=(6, 0))
 
-        _label(automation, 9, "sync_folder")
-        sy2 = _row(automation)
-        sy2.grid(row=10, column=0, padx=22, sticky="ew")
-        sy2.grid_columnconfigure(0, weight=1)
+        controls = _row(
+            backup, 4, self.t("max_backups"),
+            self.bi("0 表示不限制每个游戏的备份数量", "0 keeps an unlimited number per game"))
+        self._max_bk_e = self._create_number_stepper(
+            controls, self.cfg.get("max_backups_per_game", 20),
+            self._apply_max_backups, 0, 10000, 5)
+        self._max_bk_e._stepper_wrapper.pack(side="left")
+
+        controls = _row(
+            backup, 5, self.t("max_backup_size"),
+            self.bi("超过上限时自动删除最旧备份，0 表示不限", "Oldest backups are removed above the limit; 0 is unlimited"))
+        self._max_size_e = self._create_number_stepper(
+            controls, self.cfg.get("max_backup_size_gb", 10.0),
+            self._apply_max_backup_size, 0, 10000, 1, decimal=True)
+        self._max_size_e._stepper_wrapper.pack(side="left")
+        ctk.CTkLabel(
+            controls, text="GB", font=font(11), text_color=C_SUBTLE_TEXT
+        ).pack(side="left", padx=(6, 0))
+
+        sync = self._settings_pages["sync"]
+        _intro(
+            sync, self.bi("云同步", "Cloud Sync"),
+            self.bi("选择同步方式、冲突策略和云端保留数量", "Choose a backend, sync behavior, and cloud retention"))
+
+        controls = _row(
+            sync, 2, self.t("auto_sync"),
+            self.bi("智能模式由游戏启动和退出触发", "Smart mode is triggered when games start and stop"))
+        self._sync_var = ctk.StringVar(
+            value="on" if self.cfg.get("sync_enabled") else "off")
+        ctk.CTkSwitch(
+            controls, text=self.t("enable"), variable=self._sync_var,
+            onvalue="on", offvalue="off", font=font(12),
+            command=self._toggle_sync).pack(side="left", padx=(0, 10))
+        self._sync_int_e = self._create_number_stepper(
+            controls, self.cfg.get("sync_interval", 10),
+            self._apply_sync_interval, 1, 1440, 5)
+        self._sync_int_e._stepper_wrapper.pack(side="left")
+        ctk.CTkLabel(
+            controls, text=self.bi("分钟", "min"), font=font(11),
+            text_color=C_SUBTLE_TEXT).pack(side="left", padx=(6, 0))
+
+        controls = _row(
+            sync, 3, self.t("sync_mode"),
+            self.bi("智能云存档适合在多台电脑之间自动接续游戏", "Smart Cloud Save is recommended across multiple PCs"))
+        self._sync_mode_var = ctk.StringVar(
+            value=self._sync_mode_display(self.cfg.get("sync_mode", "smart")))
+        self._sync_mode_control = ctk.CTkOptionMenu(
+            controls, values=[label for _, label in self._sync_mode_options()],
+            variable=self._sync_mode_var, width=180, font=font(12),
+            command=self._on_sync_mode_change)
+        self._sync_mode_control.pack(side="left")
+
+        controls = _row(
+            sync, 4, self.bi("同步位置", "Sync Backend"),
+            self.bi("云盘文件夹和 WebDAV/NAS 二选一", "Choose either a cloud folder or WebDAV/NAS"))
+        backend_options = [
+            ("folder", self.bi("云盘文件夹", "Cloud Folder")),
+            ("webdav", self.bi("WebDAV / NAS", "WebDAV / NAS")),
+        ]
+        self._sync_backend_codes = {label: code for code, label in backend_options}
+        initial_backend = "webdav" if self.cfg.get("webdav_enabled") else "folder"
+        self._sync_backend_var = ctk.StringVar(
+            value=dict(backend_options)[initial_backend])
+        self._webdav_var = ctk.StringVar(
+            value="on" if initial_backend == "webdav" else "off")
+        self._sync_backend_control = ctk.CTkSegmentedButton(
+            controls, values=[label for _, label in backend_options],
+            variable=self._sync_backend_var, font=font(12),
+            command=self._on_sync_backend_change)
+        self._sync_backend_control.pack(side="left")
+        self._sync_backend_status = ctk.CTkLabel(
+            sync, text="", font=font(11), text_color=C_SUBTLE_TEXT)
+        self._sync_backend_status.grid(
+            row=5, column=0, padx=32, pady=(2, 4), sticky="w")
+
+        self._sync_folder_fields = ctk.CTkFrame(
+            sync, fg_color=C_CARD_BG, corner_radius=6,
+            border_width=1, border_color=C_SIDEBAR_SEP)
+        self._sync_folder_fields.grid(row=6, column=0, padx=30, pady=4, sticky="ew")
+        self._sync_folder_fields.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(
+            self._sync_folder_fields, text=self.t("sync_folder"),
+            font=font(12, "bold"), text_color=C_BODY_TEXT
+        ).grid(row=0, column=0, columnspan=3, padx=14, pady=(10, 6), sticky="w")
         self._sync_folder_e = ctk.CTkEntry(
-            sy2, font=font(12),
+            self._sync_folder_fields, font=font(12),
             placeholder_text=self.t("sync_folder_placeholder"))
         self._sync_folder_e.insert(0, self.cfg.get("sync_folder", ""))
-        self._sync_folder_e.grid(row=0, column=0, sticky="ew")
+        self._sync_folder_e.grid(row=1, column=0, padx=(14, 6), pady=(0, 12), sticky="ew")
         self._bind_entry_apply(self._sync_folder_e, self._apply_sync_folder)
-        ctk.CTkButton(sy2, text=self.t("browse"), width=80, font=font(12),
-                      command=lambda: self._browse(self._sync_folder_e, self._apply_sync_folder)).grid(row=0, column=1, padx=(8, 0))
-        ctk.CTkButton(sy2, text=self.t("auto_detect"), width=96, font=font(12),
-                      fg_color=BTN_SUCCESS, hover_color=BTN_SUCCESS_H,
-                      command=self._auto_detect_cloud).grid(row=0, column=2, padx=(8, 0))
+        ctk.CTkButton(
+            self._sync_folder_fields, text=self.t("browse"), width=80, height=32,
+            font=font(12), corner_radius=6, fg_color=BTN_SECONDARY,
+            hover_color=BTN_SECONDARY_H, text_color=C_BODY_TEXT,
+            command=lambda: self._browse(self._sync_folder_e, self._apply_sync_folder)
+        ).grid(row=1, column=1, padx=4, pady=(0, 12))
+        ctk.CTkButton(
+            self._sync_folder_fields, text=self.t("auto_detect"), width=96, height=32,
+            font=font(12), corner_radius=6, fg_color=BTN_PRIMARY,
+            hover_color=BTN_PRIMARY_H, command=self._auto_detect_cloud
+        ).grid(row=1, column=2, padx=(4, 14), pady=(0, 12))
 
-        _label(automation, 11, "sync_mode")
-        self._sync_mode_var = ctk.StringVar(value=self._sync_mode_display(self.cfg.get("sync_mode", "smart")))
-        ctk.CTkSegmentedButton(
-            automation,
-            values=[label for _, label in self._sync_mode_options()],
-            variable=self._sync_mode_var, font=font(12),
-            command=self._on_sync_mode_change
-        ).grid(row=12, column=0, padx=22, sticky="w")
-        ctk.CTkLabel(automation, text=self.t("sync_hint"), font=font(11),
-                     text_color=C_SUBTLE_TEXT, wraplength=680,
-                     justify="left").grid(row=13, column=0, padx=22, pady=(6, 0), sticky="w")
-
-        sync_keep_row = _row(automation)
-        sync_keep_row.grid(row=14, column=0, padx=22, pady=(10, 0), sticky="w")
-        ctk.CTkLabel(sync_keep_row, text=self.t("sync_archive_keep"), font=font(12)).pack(side="left")
-        self._sync_archive_keep_e = ctk.CTkEntry(sync_keep_row, width=64, font=font(12))
-        self._sync_archive_keep_e.insert(0, str(self.cfg.get("sync_archive_keep", 3)))
-        self._sync_archive_keep_e.pack(side="left", padx=6)
-        self._bind_entry_apply(self._sync_archive_keep_e, self._apply_sync_archive_keep)
-        ctk.CTkLabel(sync_keep_row, text=self.t("sync_archive_keep_suffix"), font=font(12)).pack(side="left")
-
-        self._sync_notify_var = ctk.StringVar(value="on" if self.cfg.get("sync_notify", True) else "off")
-        ctk.CTkSwitch(automation, text=self.t("sync_notify"),
-                      variable=self._sync_notify_var, onvalue="on", offvalue="off",
-                      font=font(12), command=self._toggle_sync_notify).grid(row=15, column=0, padx=22, pady=(12, 0), sticky="w")
-
-        # --- WebDAV ---
-        webdav_row = _row(automation)
-        webdav_row.grid(row=16, column=0, padx=22, pady=(10, 0), sticky="w")
-        self._webdav_var = ctk.StringVar(value="on" if self.cfg.get("webdav_enabled") else "off")
-        ctk.CTkSwitch(webdav_row, text=self.t("webdav_enable"),
-                      variable=self._webdav_var, onvalue="on", offvalue="off",
-                      font=font(12), command=self._toggle_webdav).pack(side="left")
-        if not HAS_WEBDAV:
-            ctk.CTkLabel(automation, text=self.t("webdav_missing"),
-                         font=font(11), text_color="#ea580c").grid(
-                row=17, column=0, padx=22, pady=(4, 0), sticky="w")
-
-        self._webdav_fields = _row(automation)
-        self._webdav_fields.grid(row=18, column=0, padx=22, pady=(6, 18), sticky="ew")
-        self._webdav_fields.grid_columnconfigure(0, weight=1)
-
-        ctk.CTkLabel(self._webdav_fields, text=self.t("webdav_preset"), font=font(12, "bold")).grid(
-            row=0, column=0, sticky="w", pady=(0, 2))
+        self._webdav_fields = ctk.CTkFrame(
+            sync, fg_color=C_CARD_BG, corner_radius=6,
+            border_width=1, border_color=C_SIDEBAR_SEP)
+        self._webdav_fields.grid(row=6, column=0, padx=30, pady=4, sticky="ew")
+        self._webdav_fields.grid_columnconfigure(1, weight=1)
         self._webdav_preset_var = ctk.StringVar(
             value=self._webdav_preset_display(self.cfg.get("webdav_preset", "generic")))
+        ctk.CTkLabel(
+            self._webdav_fields, text=self.t("webdav_preset"),
+            font=font(12, "bold")).grid(
+                row=0, column=0, padx=14, pady=(12, 4), sticky="w")
         self._webdav_preset_menu = ctk.CTkOptionMenu(
-            self._webdav_fields,
-            variable=self._webdav_preset_var,
+            self._webdav_fields, variable=self._webdav_preset_var,
             values=[self._webdav_preset_display(code) for code in WEBDAV_PRESET_OPTIONS],
             width=220, font=font(12), command=self._on_webdav_preset_change)
-        self._webdav_preset_menu.grid(row=1, column=0, sticky="w", pady=(0, 6))
+        self._webdav_preset_menu.grid(
+            row=0, column=1, padx=(8, 14), pady=(12, 4), sticky="w")
         self._webdav_preset_hint = ctk.CTkLabel(
-            self._webdav_fields,
-            text="",
-            font=font(11),
-            text_color=C_SUBTLE_TEXT)
-        self._webdav_preset_hint.grid(row=2, column=0, sticky="w", pady=(0, 8))
+            self._webdav_fields, text="", font=font(11), text_color=C_SUBTLE_TEXT)
+        self._webdav_preset_hint.grid(
+            row=1, column=0, columnspan=2, padx=14, pady=(0, 8), sticky="w")
 
-        ctk.CTkLabel(self._webdav_fields, text=self.t("webdav_url"), font=font(12, "bold")).grid(
-            row=3, column=0, sticky="w", pady=(0, 2))
+        ctk.CTkLabel(
+            self._webdav_fields, text=self.t("webdav_url"), font=font(12, "bold")
+        ).grid(row=2, column=0, padx=14, pady=4, sticky="w")
         self._webdav_url_e = ctk.CTkEntry(
             self._webdav_fields, font=font(12),
             placeholder_text=self.t("webdav_url_ph"))
         self._webdav_url_e.insert(0, self.cfg.get("webdav_url", ""))
-        self._webdav_url_e.grid(row=4, column=0, sticky="ew", pady=(0, 8))
+        self._webdav_url_e.grid(row=2, column=1, padx=(8, 14), pady=4, sticky="ew")
         self._bind_entry_apply(self._webdav_url_e, self._apply_webdav_url)
 
-        ctk.CTkLabel(self._webdav_fields, text=self.t("webdav_base_path"), font=font(12, "bold")).grid(
-            row=5, column=0, sticky="w", pady=(0, 2))
+        ctk.CTkLabel(
+            self._webdav_fields, text=self.t("webdav_base_path"), font=font(12, "bold")
+        ).grid(row=3, column=0, padx=14, pady=4, sticky="w")
         self._webdav_base_path_e = ctk.CTkEntry(
             self._webdav_fields, font=font(12),
             placeholder_text=self.t("webdav_base_path_ph"))
-        self._webdav_base_path_e.insert(0, self.cfg.get("webdav_base_path", "/SteamSaveSync"))
-        self._webdav_base_path_e.grid(row=6, column=0, sticky="ew", pady=(0, 8))
-        self._bind_entry_apply(self._webdav_base_path_e, self._apply_webdav_base_path)
+        self._webdav_base_path_e.insert(
+            0, self.cfg.get("webdav_base_path", "/SteamSaveSync"))
+        self._webdav_base_path_e.grid(
+            row=3, column=1, padx=(8, 14), pady=4, sticky="ew")
+        self._bind_entry_apply(
+            self._webdav_base_path_e, self._apply_webdav_base_path)
 
-        ctk.CTkLabel(self._webdav_fields, text=self.t("webdav_username"), font=font(12, "bold")).grid(
-            row=7, column=0, sticky="w", pady=(0, 2))
+        ctk.CTkLabel(
+            self._webdav_fields, text=self.t("webdav_username"), font=font(12, "bold")
+        ).grid(row=4, column=0, padx=14, pady=4, sticky="w")
         self._webdav_user_e = ctk.CTkEntry(self._webdav_fields, font=font(12))
         self._webdav_user_e.insert(0, self.cfg.get("webdav_username", ""))
-        self._webdav_user_e.grid(row=8, column=0, sticky="ew", pady=(0, 8))
+        self._webdav_user_e.grid(
+            row=4, column=1, padx=(8, 14), pady=4, sticky="ew")
         self._bind_entry_apply(self._webdav_user_e, self._apply_webdav_user)
 
-        ctk.CTkLabel(self._webdav_fields, text=self.t("webdav_password"), font=font(12, "bold")).grid(
-            row=9, column=0, sticky="w", pady=(0, 2))
-        self._webdav_pass_e = ctk.CTkEntry(self._webdav_fields, font=font(12), show="*")
-        self._webdav_pass_e.insert(0, _webdav_decode_password(self.cfg.get("webdav_password", "")))
-        self._webdav_pass_e.grid(row=10, column=0, sticky="ew", pady=(0, 8))
+        ctk.CTkLabel(
+            self._webdav_fields, text=self.t("webdav_password"), font=font(12, "bold")
+        ).grid(row=5, column=0, padx=14, pady=4, sticky="w")
+        password_row = ctk.CTkFrame(self._webdav_fields, fg_color="transparent")
+        password_row.grid(row=5, column=1, padx=(8, 14), pady=4, sticky="ew")
+        password_row.grid_columnconfigure(0, weight=1)
+        self._webdav_pass_e = ctk.CTkEntry(
+            password_row, font=font(12), show="*")
+        self._webdav_pass_e.insert(
+            0, _webdav_decode_password(self.cfg.get("webdav_password", "")))
+        self._webdav_pass_e.grid(row=0, column=0, sticky="ew")
         self._bind_entry_apply(self._webdav_pass_e, self._apply_webdav_pass)
+        self._webdav_password_visible = False
+        self._webdav_password_btn = ctk.CTkButton(
+            password_row, text=self.bi("显示", "Show"), width=58, height=30,
+            font=font(11), corner_radius=6, fg_color=BTN_SECONDARY,
+            hover_color=BTN_SECONDARY_H, text_color=C_BODY_TEXT,
+            command=self._toggle_webdav_password_visibility)
+        self._webdav_password_btn.grid(row=0, column=1, padx=(6, 0))
 
         self._webdav_verify_ssl_var = ctk.StringVar(
             value="on" if self.cfg.get("webdav_verify_ssl", True) else "off")
         ctk.CTkSwitch(
-            self._webdav_fields,
-            text=self.t("webdav_verify_ssl_desc"),
+            self._webdav_fields, text=self.t("webdav_verify_ssl_desc"),
             variable=self._webdav_verify_ssl_var, onvalue="on", offvalue="off",
-            font=font(12), command=self._toggle_webdav_verify_ssl
-        ).grid(row=11, column=0, sticky="w", pady=(0, 10))
-
-        webdav_btn_row = _row(self._webdav_fields)
-        webdav_btn_row.grid(row=12, column=0, sticky="w")
-        ctk.CTkButton(webdav_btn_row, text=self.t("webdav_test"), width=120, font=font(12),
-                      fg_color=BTN_SUCCESS, hover_color=BTN_SUCCESS_H,
-                      command=self._test_webdav_connection).pack(side="left")
+            font=font(11), command=self._toggle_webdav_verify_ssl
+        ).grid(row=6, column=0, columnspan=2, padx=14, pady=(8, 4), sticky="w")
+        webdav_test_row = ctk.CTkFrame(
+            self._webdav_fields, fg_color="transparent")
+        webdav_test_row.grid(
+            row=7, column=0, columnspan=2, padx=14, pady=(6, 12), sticky="ew")
+        ctk.CTkButton(
+            webdav_test_row, text=self.t("webdav_test"), width=120, height=32,
+            font=font(12), corner_radius=6, fg_color=BTN_PRIMARY,
+            hover_color=BTN_PRIMARY_H, command=self._test_webdav_connection
+        ).pack(side="left")
         self._webdav_status = ctk.CTkLabel(
-            webdav_btn_row, text="", font=font(11), text_color=C_SUBTLE_TEXT)
+            webdav_test_row, text="", font=font(11), text_color=C_SUBTLE_TEXT)
         self._webdav_status.pack(side="left", padx=(10, 0))
-        self._refresh_webdav_preset_hint()
 
-        if not self.cfg.get("webdav_enabled"):
-            self._webdav_fields.grid_remove()
+        controls = _row(
+            sync, 7, self.t("sync_archive_keep"),
+            self.t("sync_archive_keep_suffix"))
+        self._sync_archive_keep_e = self._create_number_stepper(
+            controls, self.cfg.get("sync_archive_keep", 3),
+            self._apply_sync_archive_keep, 0, 100, 1)
+        self._sync_archive_keep_e._stepper_wrapper.pack(side="left")
 
-        # System
-        _label(system, 2, "minimize_tray")
-        self._minimize_tray_var = ctk.StringVar(value="on" if self.cfg.get("minimize_to_tray", True) else "off")
-        ctk.CTkSwitch(system, text=self.t("minimize_tray_desc"),
-                      variable=self._minimize_tray_var, onvalue="on", offvalue="off",
-                      font=font(12), command=self._toggle_minimize_to_tray).grid(row=3, column=0, padx=22, sticky="w")
-        if not HAS_TRAY:
-            ctk.CTkLabel(system, text=self.t("tray_missing"), font=font(11),
-                         text_color="#ea580c").grid(row=4, column=0, padx=22, pady=(4, 0), sticky="w")
-
-        _label(system, 5, "autostart")
-        self._autostart_var = ctk.StringVar(value="on" if self.cfg.get("autostart") else "off")
-        ctk.CTkSwitch(system, text=self.t("autostart_desc"),
-                      variable=self._autostart_var, onvalue="on", offvalue="off",
-                      font=font(12), command=self._toggle_autostart).grid(
-            row=6, column=0, padx=22, sticky="w")
-
-        self._autostart_minimize_var = ctk.StringVar(
-            value="on" if self.cfg.get("autostart_minimize", True) else "off"
-        )
+        controls = _row(
+            sync, 8, self.bi("同步通知", "Sync Notifications"),
+            self.t("sync_notify"))
+        self._sync_notify_var = ctk.StringVar(
+            value="on" if self.cfg.get("sync_notify", True) else "off")
         ctk.CTkSwitch(
-            system, text=self.t("autostart_minimize_desc"),
+            controls, text="", width=42, variable=self._sync_notify_var,
+            onvalue="on", offvalue="off", command=self._toggle_sync_notify
+        ).pack(side="left")
+
+        system = self._settings_pages["system"]
+        _intro(
+            system, self.bi("系统与存储", "System & Storage"),
+            self.bi("托盘、自启、列表密度与备份目录", "Tray, startup, list density, and backup storage"))
+
+        controls = _row(
+            system, 2, self.t("minimize_tray"), self.t("minimize_tray_desc"))
+        self._minimize_tray_var = ctk.StringVar(
+            value="on" if self.cfg.get("minimize_to_tray", True) else "off")
+        ctk.CTkSwitch(
+            controls, text="", width=42, variable=self._minimize_tray_var,
+            onvalue="on", offvalue="off",
+            state="normal" if HAS_TRAY else "disabled",
+            command=self._toggle_minimize_to_tray).pack(side="left")
+
+        controls = _row(
+            system, 3, self.t("autostart"), self.t("autostart_desc"))
+        self._autostart_var = ctk.StringVar(
+            value="on" if self.cfg.get("autostart") else "off")
+        ctk.CTkSwitch(
+            controls, text="", width=42, variable=self._autostart_var,
+            onvalue="on", offvalue="off",
+            command=self._toggle_autostart).pack(side="left")
+
+        controls = _row(
+            system, 4, self.t("autostart_minimize"),
+            self.t("autostart_minimize_desc"))
+        self._autostart_minimize_var = ctk.StringVar(
+            value="on" if self.cfg.get("autostart_minimize", True) else "off")
+        ctk.CTkSwitch(
+            controls, text="", width=42,
             variable=self._autostart_minimize_var, onvalue="on", offvalue="off",
-            font=font(12), command=self._toggle_autostart_minimize
-        ).grid(row=7, column=0, padx=22, pady=(6, 0), sticky="w")
+            command=self._toggle_autostart_minimize).pack(side="left")
 
-        _label(system, 8, "backup_rotation")
-        rf = _row(system)
-        rf.grid(row=9, column=0, padx=22, sticky="w")
-        ctk.CTkLabel(rf, text=self.t("max_backups"), font=font(12)).pack(side="left")
-        self._max_bk_e = ctk.CTkEntry(rf, width=64, font=font(12))
-        self._max_bk_e.insert(0, str(self.cfg.get("max_backups_per_game", 20)))
-        self._max_bk_e.pack(side="left", padx=6)
-        self._bind_entry_apply(self._max_bk_e, self._apply_max_backups)
-        ctk.CTkLabel(rf, text=self.t("max_backups_suffix"), font=font(12)).pack(side="left")
+        controls = _row(
+            system, 5, self.t("games_page_size"),
+            self.t("games_page_size_suffix"))
+        self._games_page_size_e = self._create_number_stepper(
+            controls, self._games_page_size,
+            self._apply_games_page_size, 5, 200, 5)
+        self._games_page_size_e._stepper_wrapper.pack(side="left")
 
-        rf2 = _row(system)
-        rf2.grid(row=10, column=0, padx=22, pady=(6, 0), sticky="w")
-        ctk.CTkLabel(rf2, text=self.t("max_backup_size"), font=font(12)).pack(side="left")
-        self._max_size_e = ctk.CTkEntry(rf2, width=64, font=font(12))
-        self._max_size_e.insert(0, str(self.cfg.get("max_backup_size_gb", 10.0)))
-        self._max_size_e.pack(side="left", padx=6)
-        self._bind_entry_apply(self._max_size_e, self._apply_max_backup_size)
-        ctk.CTkLabel(rf2, text=self.t("max_backup_size_suffix"), font=font(12)).pack(side="left")
+        controls = _row(
+            system, 6, self.t("backup_page_size"),
+            self.t("backup_page_size_suffix"))
+        self._backup_page_size_e = self._create_number_stepper(
+            controls, self._backup_page_size,
+            self._apply_backup_page_size, 5, 200, 5)
+        self._backup_page_size_e._stepper_wrapper.pack(side="left")
 
-        _label(system, 11, "display_page_size")
-        pf = _row(system)
-        pf.grid(row=12, column=0, padx=22, sticky="w")
-        ctk.CTkLabel(pf, text=self.t("games_page_size"), font=font(12)).pack(side="left")
-        self._games_page_size_e = ctk.CTkEntry(pf, width=64, font=font(12))
-        self._games_page_size_e.insert(0, str(self._games_page_size))
-        self._games_page_size_e.pack(side="left", padx=6)
-        self._bind_entry_apply(self._games_page_size_e, self._apply_games_page_size)
-        ctk.CTkLabel(pf, text=self.t("games_page_size_suffix"), font=font(12)).pack(side="left")
-
-        pf2 = _row(system)
-        pf2.grid(row=13, column=0, padx=22, pady=(6, 0), sticky="w")
-        ctk.CTkLabel(pf2, text=self.t("backup_page_size"), font=font(12)).pack(side="left")
-        self._backup_page_size_e = ctk.CTkEntry(pf2, width=64, font=font(12))
-        self._backup_page_size_e.insert(0, str(self._backup_page_size))
-        self._backup_page_size_e.pack(side="left", padx=6)
-        self._bind_entry_apply(self._backup_page_size_e, self._apply_backup_page_size)
-        ctk.CTkLabel(pf2, text=self.t("backup_page_size_suffix"), font=font(12)).pack(side="left")
-
-        _label(system, 14, "backup_storage")
-        bpf = _row(system)
-        bpf.grid(row=15, column=0, padx=22, sticky="ew")
-        bpf.grid_columnconfigure(0, weight=1)
+        controls = _wide_row(
+            system, 7, self.t("backup_storage"),
+            self.bi("留空时使用软件目录下的 backups 文件夹", "Leave empty to use the app's backups folder"))
         self._backup_path_e = ctk.CTkEntry(
-            bpf, font=font(12),
+            controls, font=font(12),
             placeholder_text=self.t("backup_storage_placeholder"))
         self._backup_path_e.insert(0, self.cfg.get("backup_path", ""))
         self._backup_path_e.grid(row=0, column=0, sticky="ew")
         self._bind_entry_apply(self._backup_path_e, self._apply_backup_path)
-        ctk.CTkButton(bpf, text=self.t("browse"), width=80, font=font(12),
-                      command=lambda: self._browse(self._backup_path_e, self._apply_backup_path)).grid(row=0, column=1, padx=(8, 0))
+        ctk.CTkButton(
+            controls, text=self.t("browse"), width=82, height=32, font=font(12),
+            corner_radius=6, fg_color=BTN_SECONDARY, hover_color=BTN_SECONDARY_H,
+            text_color=C_BODY_TEXT,
+            command=lambda: self._browse(self._backup_path_e, self._apply_backup_path)
+        ).grid(row=0, column=1, padx=(8, 0))
         self._backup_current_path_label = ctk.CTkLabel(
             system, text=self.t("current_path", path=str(BACKUP_ROOT)),
             font=font(11), text_color=C_SUBTLE_TEXT)
         self._backup_current_path_label.grid(
-            row=16, column=0, padx=22, pady=(6, 18), sticky="w")
+            row=8, column=0, padx=32, pady=(4, 8), sticky="w")
         ctk.CTkButton(
             system, text=self.bi("关于软件", "About"),
             width=120, height=34, font=font(12, "bold"),
-            corner_radius=8, fg_color=BTN_PRIMARY, hover_color=BTN_PRIMARY_H,
+            corner_radius=8, fg_color=BTN_SECONDARY,
+            hover_color=BTN_SECONDARY_H, text_color=C_BODY_TEXT,
             command=self._show_about_dialog
-        ).grid(row=17, column=0, padx=22, pady=(0, 18), sticky="w")
+        ).grid(row=9, column=0, padx=30, pady=(4, 18), sticky="w")
 
-
+        self._refresh_webdav_preset_hint()
+        self._refresh_sync_backend_panels()
+        self._refresh_settings_dependency_states()
+        self._show_settings_page("general")
 
     def _set_entry_value(self, entry, value):
         entry.delete(0, "end")
         entry.insert(0, str(value))
 
     def _invoke_and_break(self, callback):
-        callback()
+        self._run_setting_callback(callback)
         return "break"
 
+    def _run_setting_callback(self, callback):
+        try:
+            callback()
+            self._mark_settings_saved()
+        except Exception as exc:
+            self._mark_settings_saved(self.bi("保存失败", "Save failed"), error=True)
+            logger.warning("Failed to apply a UI setting: %s", exc)
+
     def _bind_entry_apply(self, entry, callback):
-        entry.bind("<FocusOut>", lambda _e: callback())
+        entry.bind("<FocusOut>", lambda _e: self._run_setting_callback(callback))
         entry.bind("<Return>", lambda _e: self._invoke_and_break(callback))
 
     def _refresh_backup_storage_hint(self):
@@ -14218,7 +14948,7 @@ class SteamSaveManager(ctk.CTk):
 
     def _apply_auto_backup_interval(self):
         try:
-            value = max(1, int(self._int_e.get().strip()))
+            value = min(1440, max(1, int(self._int_e.get().strip())))
         except ValueError:
             value = int(self.cfg.get("auto_backup_interval", 30))
         self._set_entry_value(self._int_e, value)
@@ -14228,7 +14958,7 @@ class SteamSaveManager(ctk.CTk):
 
     def _apply_watch_cooldown(self):
         try:
-            value = max(10, int(self._cd_e.get().strip()))
+            value = min(3600, max(10, int(self._cd_e.get().strip())))
         except ValueError:
             value = int(self.cfg.get("watch_cooldown", 60))
         self._set_entry_value(self._cd_e, value)
@@ -14238,7 +14968,7 @@ class SteamSaveManager(ctk.CTk):
 
     def _apply_sync_interval(self):
         try:
-            value = max(1, int(self._sync_int_e.get().strip()))
+            value = min(1440, max(1, int(self._sync_int_e.get().strip())))
         except ValueError:
             value = int(self.cfg.get("sync_interval", 10))
         self._set_entry_value(self._sync_int_e, value)
@@ -14250,10 +14980,11 @@ class SteamSaveManager(ctk.CTk):
         self.cfg["sync_folder"] = self._sync_folder_e.get().strip()
         self.cfg["sync_folder_source"] = "manual"
         save_config(self.cfg)
+        self._refresh_sync_backend_status()
 
     def _apply_sync_archive_keep(self):
         try:
-            value = max(0, int(self._sync_archive_keep_e.get().strip()))
+            value = min(100, max(0, int(self._sync_archive_keep_e.get().strip())))
         except ValueError:
             value = int(self.cfg.get("sync_archive_keep", 3))
         self._set_entry_value(self._sync_archive_keep_e, value)
@@ -14266,10 +14997,13 @@ class SteamSaveManager(ctk.CTk):
         save_config(self.cfg)
         self._restart_sync_runtime()
         self._refresh_proc_status()
+        self._refresh_settings_dependency_states()
+        self._mark_settings_saved()
 
     def _toggle_sync_notify(self):
         self.cfg["sync_notify"] = self._sync_notify_var.get() == "on"
         save_config(self.cfg)
+        self._mark_settings_saved()
 
     # ─── WebDAV 设置 ───
     def _webdav_preset_display(self, preset_code: str) -> str:
@@ -14313,10 +15047,8 @@ class SteamSaveManager(ctk.CTk):
         en = self._webdav_var.get() == "on"
         self.cfg["webdav_enabled"] = en
         save_config(self.cfg)
-        if en:
-            self._webdav_fields.grid()
-        else:
-            self._webdav_fields.grid_remove()
+        self._refresh_sync_backend_panels()
+        self._mark_settings_saved()
 
     def _on_webdav_preset_change(self, display_text):
         self.cfg["webdav_preset"] = self._webdav_preset_code(display_text)
@@ -14324,6 +15056,8 @@ class SteamSaveManager(ctk.CTk):
             self._apply_webdav_url()
         self._refresh_webdav_preset_hint()
         save_config(self.cfg)
+        self._refresh_sync_backend_status()
+        self._mark_settings_saved()
 
     def _apply_webdav_url(self):
         normalized = _webdav_normalize_url(
@@ -14336,6 +15070,7 @@ class SteamSaveManager(ctk.CTk):
             self._webdav_url_e.delete(0, "end")
             self._webdav_url_e.insert(0, normalized)
         save_config(self.cfg)
+        self._refresh_sync_backend_status()
 
     def _apply_webdav_base_path(self):
         self.cfg["webdav_base_path"] = _webdav_base_path({
@@ -14352,14 +15087,17 @@ class SteamSaveManager(ctk.CTk):
             self._apply_webdav_url()
         self._refresh_webdav_preset_hint()
         save_config(self.cfg)
+        self._refresh_sync_backend_status()
 
     def _apply_webdav_pass(self):
         self.cfg["webdav_password"] = _webdav_encode_password(self._webdav_pass_e.get())
         save_config(self.cfg)
+        self._refresh_sync_backend_status()
 
     def _toggle_webdav_verify_ssl(self):
         self.cfg["webdav_verify_ssl"] = self._webdav_verify_ssl_var.get() == "on"
         save_config(self.cfg)
+        self._mark_settings_saved()
 
     def _test_webdav_connection(self):
         url = self._webdav_url_e.get().strip()
@@ -14389,14 +15127,16 @@ class SteamSaveManager(ctk.CTk):
         else:
             self._webdav_status.configure(
                 text=f"{self.t('webdav_test_fail')}: {msg}", text_color="#ef4444")
+        self._refresh_sync_backend_status()
 
     def _toggle_minimize_to_tray(self):
         self.cfg["minimize_to_tray"] = self._minimize_tray_var.get() == "on"
         save_config(self.cfg)
+        self._mark_settings_saved()
 
     def _apply_max_backups(self):
         try:
-            value = max(0, int(self._max_bk_e.get().strip()))
+            value = min(10000, max(0, int(self._max_bk_e.get().strip())))
         except ValueError:
             value = int(self.cfg.get("max_backups_per_game", 20))
         self._set_entry_value(self._max_bk_e, value)
@@ -14406,7 +15146,7 @@ class SteamSaveManager(ctk.CTk):
 
     def _apply_max_backup_size(self):
         try:
-            value = max(0.0, float(self._max_size_e.get().strip()))
+            value = min(10000.0, max(0.0, float(self._max_size_e.get().strip())))
         except ValueError:
             value = float(self.cfg.get("max_backup_size_gb", 10.0))
         self._set_entry_value(self._max_size_e, value)
@@ -14472,37 +15212,23 @@ class SteamSaveManager(ctk.CTk):
             set_autostart_enabled(en)
             self.cfg["autostart"] = en
             save_config(self.cfg)
+            self._mark_settings_saved()
         except Exception as e:
             self._show_error(self.t("settings_failed_title"), str(e))
             self._autostart_var.set("on" if not en else "off")
+            self._mark_settings_saved(self.bi("保存失败", "Save failed"), error=True)
 
     def _toggle_autostart_minimize(self):
         self.cfg["autostart_minimize"] = self._autostart_minimize_var.get() == "on"
         save_config(self.cfg)
+        self._mark_settings_saved()
 
     def _on_theme(self, val):
         t = self._theme_code(val)
         ctk.set_appearance_mode(t)
-        self.cfg["theme"] = t; save_config(self.cfg)
-        # Update settings page canvas & scrollbar colors dynamically
-        try:
-            canvas = getattr(self, "_settings_scroll", None)
-            if canvas is not None:
-                mode = "light" if t == "light" else "dark"
-                canvas.configure(bg=C_MAIN_BG[0 if t == "light" else 1])
-                for child in canvas.master.winfo_children():
-                    if isinstance(child, tkinter.Canvas) and child is not canvas:
-                        child.configure(bg=C_MAIN_BG[0 if t == "light" else 1])
-                        items = child.find_all()
-                        if len(items) >= 2:
-                            cols = {
-                                "light": {"track": "#e2e2e2", "thumb": "#c0c0c0"},
-                                "dark":  {"track": "#333348", "thumb": "#555568"},
-                            }[mode]
-                            child.itemconfigure(items[0], fill=cols["track"])
-                            child.itemconfigure(items[1], fill=cols["thumb"])
-        except Exception:
-            pass
+        self.cfg["theme"] = t
+        save_config(self.cfg)
+        self._mark_settings_saved()
 
     def _toggle_auto(self):
         en = self._auto_var.get() == "on"
@@ -14510,16 +15236,21 @@ class SteamSaveManager(ctk.CTk):
         self._restart_auto_backup_runtime()
         self._restart_watchers_runtime()
         self._update_status()
+        self._refresh_settings_dependency_states()
+        self._mark_settings_saved()
 
     def _toggle_watch(self):
         en = self._watch_var.get() == "on"
         self.cfg["watch_enabled"] = en; save_config(self.cfg)
         self._restart_watchers_runtime()
+        self._refresh_settings_dependency_states()
+        self._mark_settings_saved()
 
     def _toggle_steamdb_detection(self):
         self.cfg["steamdb_detection_enabled"] = self._steamdb_detection_var.get() == "on"
         _SAVE_DETECTION_CACHE.clear()
         save_config(self.cfg)
+        self._mark_settings_saved()
 
     def _auto_detect_cloud(self):
         path = detect_cloud_folder()
@@ -14529,6 +15260,8 @@ class SteamSaveManager(ctk.CTk):
             self.cfg["sync_folder"] = path
             self.cfg["sync_folder_source"] = "auto"
             save_config(self.cfg)
+            self._refresh_sync_backend_status()
+            self._mark_settings_saved()
             self._show_info(self.t("detect_success_title"),
                             self.t("detect_success_body", path=path))
         else:
@@ -14539,6 +15272,8 @@ class SteamSaveManager(ctk.CTk):
         en = self._sync_var.get() == "on"
         self.cfg["sync_enabled"] = en; save_config(self.cfg)
         self._restart_sync_runtime()
+        self._refresh_settings_dependency_states()
+        self._mark_settings_saved()
 
     def _manual_sync_all(self):
         if self._io_busy:

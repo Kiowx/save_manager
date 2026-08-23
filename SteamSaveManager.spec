@@ -37,6 +37,11 @@ for package_name in ("customtkinter", "pystray", "webdav3"):
     binaries += collected[1]
     hiddenimports += collected[2]
 
+assets_dir = ROOT / "assets"
+if assets_dir.is_dir():
+    datas.append((str(assets_dir), "assets"))
+app_icon = assets_dir / "app_logo.ico"
+
 
 a = Analysis(
     [ENTRY_SCRIPT],
@@ -73,5 +78,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon="NONE",
+    icon=str(app_icon) if app_icon.is_file() else "NONE",
 )

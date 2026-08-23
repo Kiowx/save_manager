@@ -87,6 +87,28 @@ class Issue21And22Tests(unittest.TestCase):
             self.assertEqual("游戏退出后自动备份", handler._pending_note)
             handler.close()
 
+    def test_scheduled_backup_runs_while_game_is_running(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            save_dir = Path(temp_dir)
+            (save_dir / "Level.sav").write_bytes(b"save")
+            handler = main.SaveChangeHandler(
+                self._game(save_dir, backup_on_exit=False),
+                cooldown=60,
+                is_game_running=lambda _game: True,
+            )
+            handler._timer_factory = FakeTimer
+            handler._quiet_delay = 0
+            handler._perform_backup_with_retry = mock.Mock(return_value=True)
+
+            handler.request_scheduled_backup()
+            handler._timer.fire()
+
+            handler._perform_backup_with_retry.assert_called_once()
+            self.assertFalse(handler._pending)
+            self.assertFalse(handler._deferred_for_running)
+            self.assertEqual("定时自动备份", handler._pending_note)
+            handler.close()
+
     def test_exit_mode_creates_backup_without_file_event(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             save_dir = Path(temp_dir)
