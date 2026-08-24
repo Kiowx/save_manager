@@ -1,6 +1,6 @@
 {
-  "sha256": "b2bc160d5abd27608a54c8183a8159734f4ec1341c2649155a30db95dc28ec46",
-  "notes": "1. 全面优化主页、扫描、游戏、备份、详情和设置界面，增加筛选、分页、状态反馈和高 DPI 自适应布局。\n2. 修复确认弹窗“否”按钮看不清、短消息出现多余滚动条以及连续切换页面时侧栏文字消失的问题。\n3. 新增应用 Logo，并同步用于侧栏、窗口和安装包图标。\n4. 修复关闭“游戏退出后自动备份”后定时备份失效的问题；定时备份会在游戏运行期间按间隔执行，文件变动备份仍等待游戏退出。[#23](https://github.com/Kiowx/save_manager/issues/23)\n5. 版本更新至 1.6.0。\n6. Refresh the Home, Scan, Games, Backups, Details, and Settings views with filters, pagination, status feedback, and high-DPI responsive layouts.\n7. Fix unreadable “No” buttons in confirmation dialogs, unnecessary scrollbars for short messages, and disappearing sidebar labels after repeated navigation.\n8. Add a new app logo for the sidebar, window, and packaged executable.\n9. Fix scheduled backups not running when “Back up after game exit” is disabled; scheduled backups now run at the configured interval while games are open, while file-change backups still wait for game exit. [#23](https://github.com/Kiowx/save_manager/issues/23)\n10. Bump the version to 1.6.0.",
-  "url": "https://github.com/Kiowx/save_manager/releases/download/v1.6.0/SteamSaveManager.exe",
-  "version": "1.6.0"
+  "version": "1.6.1",
+  "sha256": "525b27f08bf6d75e27ae2f9a10cabd58fdf20ed13e9a6bd0879be915bc130e4c",
+  "notes": "1. 统一侧边栏和操作按钮的扁平化图标，优化对齐、间距与紧凑窗口布局。\n2. 优化主页统计、快捷操作、最近备份和空状态，操作按钮会根据当前配置显示可用、加载和完成状态。\n3. 改进游戏、备份、详情和设置页面的响应式布局、滚动条与深色主题显示。\n4. 修复任务结束后错误启用不可用按钮、滚动列表宽度异常以及确认弹窗按钮不清晰的问题。\n5. 版本更新至 1.6.1。\n6. Unify flat icons across the sidebar and action buttons, with improved alignment, spacing, and compact-window layouts.\n7. Refine Home stats, quick actions, recent backups, and empty states, with action buttons reflecting availability, loading, and completion states.\n8. Improve responsive layouts, scrollbars, and dark-theme rendering across Games, Backups, Details, and Settings.\n9. Fix unavailable buttons becoming enabled after tasks finish, incorrect scrollable-list widths, and unclear confirmation-dialog buttons.\n10. Bump the version to 1.6.1.",
+  "url": "https://github.com/Kiowx/save_manager/releases/download/v1.6.1/SteamSaveManager.exe"
 }
