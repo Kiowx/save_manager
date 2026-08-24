@@ -25,7 +25,7 @@
   <a href="https://github.com/Kiowx/save_manager/releases">查看所有版本</a>
 </p>
 
-![Steam Save Manager 主页](./assets/screenshots/home.png)
+![Steam Save Manager 1.6.1 主页](./assets/screenshots/home.png)
 
 <details>
 <summary>查看更多界面</summary>

@@ -25,7 +25,7 @@
   <a href="https://github.com/Kiowx/save_manager/releases">View all releases</a>
 </p>
 
-![Steam Save Manager Home](./assets/screenshots/home-en.png)
+![Steam Save Manager 1.6.1 Home](./assets/screenshots/home-en.png)
 
 ## Features
 
