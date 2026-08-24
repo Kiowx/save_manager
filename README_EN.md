@@ -25,7 +25,7 @@
   <a href="https://github.com/Kiowx/save_manager/releases">View all releases</a>
 </p>
 
-![Steam Save Manager 1.6.0 Home](./assets/screenshots/home-en.png)
+![Steam Save Manager Home](./assets/screenshots/home-en.png)
 
 ## Features
 
@@ -38,7 +38,8 @@
 - Supports WebDAV and NAS servers with presets for Synology, QNAP, TrueNAS, Nextcloud, and OpenMediaVault
 - Provides Smart Cloud Save, bidirectional, upload-only, and download-only modes with conflict handling and retries
 - Rebuilds game entries and retrieves the latest saves from WebDAV archives after a fresh install or PC change
-- Includes Chinese and English UI, light and dark themes, high-DPI responsiveness, filters, sorting, favorites, and pagination
+- Includes Chinese and English UI, light and dark themes, and responsive layouts for high-DPI and compact windows
+- Uses consistent flat icons, clear empty states, and action feedback, with filtering, sorting, favorites, pagination, tooltips, and scrollbars shown only when needed
 - Supports the system tray, launch at sign-in, update checks, and SHA-256 verification of downloaded updates
 
 ## Quick Start
@@ -141,7 +142,7 @@ The packaged executable is written to `dist/SteamSaveManager.exe`.
 - [`main.py`](./main.py): application entry point and core logic
 - [`requirements.txt`](./requirements.txt): base runtime and packaging dependencies
 - [`SteamSaveManager.spec`](./SteamSaveManager.spec): PyInstaller build configuration
-- [`assets/`](./assets): logo, Windows icon, and README screenshots
+- [`assets/`](./assets): logo, Windows icon, interface icons, and README screenshots
 - [`tests/`](./tests): backup, scan-safety, and UI-logic regression tests
 - [`update/update.json`](./update/update.json): client update manifest
 - [`.github/workflows/build.yml`](./.github/workflows/build.yml): Windows EXE build and GitHub Release workflow

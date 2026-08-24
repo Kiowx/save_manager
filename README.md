@@ -25,7 +25,7 @@
   <a href="https://github.com/Kiowx/save_manager/releases">查看所有版本</a>
 </p>
 
-![Steam Save Manager 1.6.0 主页](./assets/screenshots/home.png)
+![Steam Save Manager 主页](./assets/screenshots/home.png)
 
 <details>
 <summary>查看更多界面</summary>
@@ -51,7 +51,8 @@
 - 支持 WebDAV / NAS，内置 Synology、QNAP、TrueNAS、Nextcloud 和 OpenMediaVault 预设
 - 支持智能云存档、双向同步、仅上传、仅下载、冲突处理和失败重试
 - 全新安装或更换电脑时，可从 WebDAV 云端归档恢复游戏信息与最新存档
-- 支持中英文界面、深浅色主题、高 DPI 自适应、列表筛选、排序、收藏和分页
+- 支持中英文界面、深浅色主题以及高 DPI 和紧凑窗口自适应
+- 使用统一的扁平化图标、清晰的空状态和操作状态反馈，列表支持筛选、排序、收藏、分页、悬停提示和按需滚动条
 - 支持系统托盘、开机自启、自动更新检查和下载文件 SHA-256 校验
 
 ## 快速开始
@@ -154,7 +155,7 @@ pyinstaller --clean SteamSaveManager.spec
 - [`main.py`](./main.py)：主程序与核心逻辑
 - [`requirements.txt`](./requirements.txt)：基础运行和打包依赖
 - [`SteamSaveManager.spec`](./SteamSaveManager.spec)：PyInstaller 打包配置
-- [`assets/`](./assets)：Logo、Windows 图标和 README 截图
+- [`assets/`](./assets)：Logo、Windows 图标、界面图标和 README 截图
 - [`tests/`](./tests)：备份、扫描安全和 UI 逻辑回归测试
 - [`update/update.json`](./update/update.json)：客户端自动更新清单
 - [`.github/workflows/build.yml`](./.github/workflows/build.yml)：Windows EXE 构建与 Release 发布流程
