@@ -1,6 +1,6 @@
 {
-  "version": "1.6.1",
-  "sha256": "525b27f08bf6d75e27ae2f9a10cabd58fdf20ed13e9a6bd0879be915bc130e4c",
-  "notes": "1. 统一侧边栏和操作按钮的扁平化图标，优化对齐、间距与紧凑窗口布局。\n2. 优化主页统计、快捷操作、最近备份和空状态，操作按钮会根据当前配置显示可用、加载和完成状态。\n3. 改进游戏、备份、详情和设置页面的响应式布局、滚动条与深色主题显示。\n4. 修复任务结束后错误启用不可用按钮、滚动列表宽度异常以及确认弹窗按钮不清晰的问题。\n5. 版本更新至 1.6.1。\n6. Unify flat icons across the sidebar and action buttons, with improved alignment, spacing, and compact-window layouts.\n7. Refine Home stats, quick actions, recent backups, and empty states, with action buttons reflecting availability, loading, and completion states.\n8. Improve responsive layouts, scrollbars, and dark-theme rendering across Games, Backups, Details, and Settings.\n9. Fix unavailable buttons becoming enabled after tasks finish, incorrect scrollable-list widths, and unclear confirmation-dialog buttons.\n10. Bump the version to 1.6.1.",
-  "url": "https://github.com/Kiowx/save_manager/releases/download/v1.6.1/SteamSaveManager.exe"
+  "version": "1.6.2",
+  "notes": "1. 修复游戏列表和备份记录翻页后保留旧滚动位置的问题，新页面会自动回到顶部。[Issue #24](https://github.com/Kiowx/save_manager/issues/24)\n2. 版本更新至 1.6.2。\n3. Fix the Games and Backups lists retaining the previous scroll position after pagination so every new page starts at the top. [Issue #24](https://github.com/Kiowx/save_manager/issues/24)\n4. Bump the version to 1.6.2.",
+  "url": "https://github.com/Kiowx/save_manager/releases/download/v1.6.2/SteamSaveManager.exe",
+  "sha256": "43fd3cef52f59681b3647db44d6bc822b4c69f245c23b472f079bff4a73888c5"
 }
