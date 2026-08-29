@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Steam 游戏存档备份管理器 v1.6.0 — 通用版"""
+"""Steam 游戏存档备份管理器 v1.6.2 — 通用版"""
 
 import os
 import sys
@@ -104,7 +104,7 @@ except ImportError as exc:
 # ══════════════════════════════════════════════
 
 APP_NAME = "Steam Save Manager"
-VERSION = "1.6.1"
+VERSION = "1.6.2"
 APP_DIR = Path(os.path.dirname(os.path.abspath(sys.argv[0])))
 RESOURCE_DIR = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
 APP_LOGO_PATH = RESOURCE_DIR / "assets" / "app_logo.png"
@@ -9778,6 +9778,19 @@ class SteamSaveManager(ctk.CTk):
         except Exception:
             pass
 
+    def _schedule_scroll_to_top(self, scrollable):
+        def _scroll():
+            try:
+                if scrollable.winfo_exists():
+                    scrollable._parent_canvas.yview_moveto(0)
+            except Exception:
+                pass
+
+        try:
+            self.after_idle(_scroll)
+        except Exception:
+            _scroll()
+
     def _register_wrap(self, widget, fraction: float = 0.7, minimum: int = 220):
         try:
             self._responsive_labels.append((widget, float(fraction), int(minimum)))
@@ -11522,10 +11535,12 @@ class SteamSaveManager(ctk.CTk):
     def _on_games_page_delta(self, delta: int):
         self._games_page += delta
         self._refresh_games_list()
+        self._schedule_scroll_to_top(self._games_scroll)
 
     def _on_backup_page_delta(self, delta: int):
         self._backup_page += delta
         self._refresh_backup_list()
+        self._schedule_scroll_to_top(self._bk_scroll)
 
     def _on_backup_filter_changed(self):
         self._backup_page = 0

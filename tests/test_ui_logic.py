@@ -28,6 +28,22 @@ class FakeStateWidget:
         return True
 
 
+class FakeCanvas:
+    def __init__(self, events):
+        self.events = events
+
+    def yview_moveto(self, fraction):
+        self.events.append(("scroll", fraction))
+
+
+class FakeScrollable:
+    def __init__(self, events):
+        self._parent_canvas = FakeCanvas(events)
+
+    def winfo_exists(self):
+        return True
+
+
 class UiLogicTests(unittest.TestCase):
     def test_flat_ui_icon_assets_are_nonempty(self):
         icon_names = (
@@ -112,6 +128,29 @@ class UiLogicTests(unittest.TestCase):
         self.assertEqual("automatic", classify("游戏退出后自动备份"))
         self.assertEqual("automatic", classify("Scheduled backup"))
         self.assertEqual("manual", classify("手动备份"))
+
+    def test_paginated_lists_scroll_to_top_after_refresh(self):
+        app = object.__new__(main.SteamSaveManager)
+        events = []
+        app._games_page = 0
+        app._backup_page = 2
+        app._games_scroll = FakeScrollable(events)
+        app._bk_scroll = FakeScrollable(events)
+        app._refresh_games_list = lambda: events.append(("refresh", "games"))
+        app._refresh_backup_list = lambda: events.append(("refresh", "backups"))
+        app.after_idle = lambda callback: callback()
+
+        app._on_games_page_delta(1)
+        app._on_backup_page_delta(-1)
+
+        self.assertEqual(1, app._games_page)
+        self.assertEqual(1, app._backup_page)
+        self.assertEqual([
+            ("refresh", "games"),
+            ("scroll", 0),
+            ("refresh", "backups"),
+            ("scroll", 0),
+        ], events)
 
 
 if __name__ == "__main__":
