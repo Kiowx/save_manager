@@ -1,6 +1,6 @@
 {
-  "version": "1.6.2",
-  "notes": "1. 修复游戏列表和备份记录翻页后保留旧滚动位置的问题，新页面会自动回到顶部。[Issue #24](https://github.com/Kiowx/save_manager/issues/24)\n2. 版本更新至 1.6.2。\n3. Fix the Games and Backups lists retaining the previous scroll position after pagination so every new page starts at the top. [Issue #24](https://github.com/Kiowx/save_manager/issues/24)\n4. Bump the version to 1.6.2.",
-  "url": "https://github.com/Kiowx/save_manager/releases/download/v1.6.2/SteamSaveManager.exe",
-  "sha256": "43fd3cef52f59681b3647db44d6bc822b4c69f245c23b472f079bff4a73888c5"
+  "notes": "1. 修复部分 WebDAV 服务器不支持 HEAD 请求时连接测试和云端目录识别失败的问题。[PR #30](https://github.com/Kiowx/save_manager/pull/30)\n2. 修复部分 WebDAV 预设将不存在的云端目录误判为已存在的问题。[PR #30](https://github.com/Kiowx/save_manager/pull/30)\n3. 版本更新至 v1.6.3。\n4. Fix connection tests and cloud directory detection failing on WebDAV servers that do not support HEAD requests. [PR #30](https://github.com/Kiowx/save_manager/pull/30)\n5. Fix some WebDAV presets incorrectly treating missing cloud directories as existing. [PR #30](https://github.com/Kiowx/save_manager/pull/30)\n6. Update to v1.6.3.",
+  "version": "1.6.3",
+  "url": "https://github.com/Kiowx/save_manager/releases/download/v1.6.3/SteamSaveManager.exe",
+  "sha256": "2f00527189170e21a09c25b681afd193b9562b2ebb194125dee85127f787ef86"
 }
