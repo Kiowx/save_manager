@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Steam 游戏存档备份管理器 v1.6.2 — 通用版"""
+"""Steam 游戏存档备份管理器 v1.6.3 — 通用版"""
 
 import os
 import sys
@@ -104,7 +104,7 @@ except ImportError as exc:
 # ══════════════════════════════════════════════
 
 APP_NAME = "Steam Save Manager"
-VERSION = "1.6.2"
+VERSION = "1.6.3"
 APP_DIR = Path(os.path.dirname(os.path.abspath(sys.argv[0])))
 RESOURCE_DIR = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
 APP_LOGO_PATH = RESOURCE_DIR / "assets" / "app_logo.png"
@@ -5982,7 +5982,6 @@ def _webdav_split_url(url: str) -> tuple[str, str]:
 
 def _webdav_apply_client_options(client, cfg: Optional[dict]):
     verify_ssl = bool((cfg or {}).get("webdav_verify_ssl", True))
-    preset = str((cfg or {}).get("webdav_preset", "generic") or "generic").strip()
     try:
         client.verify = verify_ssl
     except Exception:
@@ -5993,11 +5992,12 @@ def _webdav_apply_client_options(client, cfg: Optional[dict]):
             session.verify = verify_ssl
     except Exception:
         pass
-    if preset != "generic":
-        try:
-            client.webdav.disable_check = True
-        except Exception:
-            pass
+    # Some WebDAV servers reject HEAD, which webdavclient3 uses for check().
+    # Let the actual WebDAV operations validate paths for every preset.
+    try:
+        client.webdav.disable_check = True
+    except Exception:
+        pass
 
 
 def webdav_is_ready(cfg: Optional[dict]) -> bool:
@@ -6305,10 +6305,13 @@ def _webdav_find_existing_variant(client, remote_path: str) -> str:
     last_error = None
     for candidate in _webdav_path_variants(remote_path):
         try:
-            if client.check(candidate):
-                return candidate
+            # PROPFIND also succeeds for empty directories, without requiring HEAD.
+            client.list(candidate)
+            return candidate
         except Exception as e:
-            last_error = e
+            lowered = str(e).lower()
+            if not any(token in lowered for token in ("404", "not found", "does not exist")):
+                last_error = e
     if last_error:
         raise last_error
     raise FileNotFoundError(remote_path)
